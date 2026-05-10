@@ -1,0 +1,807 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+    <meta name="theme-color" content="#020617" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <title>Studio Live — Cámara</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: system-ui, sans-serif;
+        background: #020617;
+        color: #e8eef6;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #020617;
+      }
+      /* Escena fija: toda la pantalla */
+      .stage {
+        position: fixed;
+        inset: 0;
+        background: #000;
+        z-index: 0;
+      }
+      /* Importante: pantalla completa debe ser .stage (vídeo + HUD), no solo el <video>, si no los botones dejan de recibir toques en Android. */
+      .stage:fullscreen,
+      .stage:-webkit-full-screen {
+        background: #000;
+      }
+      #pv {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        background: #000;
+      }
+      /* Sin stream todavía: mensaje centrado */
+      .splash {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+        text-align: center;
+        color: #94a3b8;
+        font-size: 14px;
+        z-index: 1;
+        pointer-events: none;
+      }
+      .splash strong {
+        color: #e2e8f0;
+      }
+      .splash.hidden {
+        opacity: 0;
+        visibility: hidden;
+      }
+      /* Controles sobre el vídeo */
+      .hud {
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        z-index: 3;
+        padding: 12px;
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+        padding-left: max(12px, env(safe-area-inset-left));
+        padding-right: max(12px, env(safe-area-inset-right));
+        background: linear-gradient(to top, rgba(2, 6, 23, 0.94) 0%, rgba(2, 6, 23, 0.55) 55%, transparent 100%);
+      }
+      .hud-row {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: stretch;
+      }
+      .hud-row button {
+        flex: 1 1 auto;
+        min-width: 120px;
+      }
+      button {
+        padding: 14px 16px;
+        border-radius: 12px;
+        border: 0;
+        font-weight: 600;
+        font-size: 16px;
+        background: #2563eb;
+        color: white;
+      }
+      button.secondary {
+        background: rgba(30, 41, 59, 0.95);
+        color: #e2e8f0;
+        border: 1px solid #475569;
+      }
+      .cam-pick.active {
+        outline: 2px solid #38bdf8;
+        outline-offset: 2px;
+        background: rgba(30, 58, 138, 0.95);
+      }
+      button:disabled {
+        opacity: 0.55;
+      }
+      /* Linterna: aunque no haya API torch, el botón puede intentar encenderla — no usar aspecto “fantasma”. */
+      #torchBtn.torch-unavailable {
+        opacity: 0.92;
+      }
+      .zoom-row {
+        align-items: center;
+        gap: 12px;
+        padding: 6px 0 2px;
+        flex-wrap: nowrap;
+      }
+      .zoom-row label {
+        font-size: 13px;
+        font-weight: 600;
+        color: #94a3b8;
+        flex: 0 0 auto;
+      }
+      #zoomSlider {
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: 40px;
+        accent-color: #38bdf8;
+      }
+      #zoomSlider:disabled {
+        opacity: 0.45;
+      }
+      pre#log {
+        margin: 0 0 10px;
+        max-height: 18vh;
+        overflow: auto;
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-size: 11px;
+        line-height: 1.35;
+        color: #94a3b8;
+        -webkit-overflow-scrolling: touch;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="stage" id="stage">
+      <video id="pv" autoplay playsinline muted></video>
+      <div id="splash" class="splash">
+        <div>
+          <strong>Studio Live</strong><br />
+          Tocá «Transmitir» abajo para usar la cámara a pantalla completa en el celular.
+        </div>
+      </div>
+      <div class="hud">
+        <pre id="log"></pre>
+        <div class="hud-row hud-cams">
+          <button type="button" id="camEnv" class="secondary cam-pick active" disabled title="Cámara trasera">
+            Trasera
+          </button>
+          <button type="button" id="camUser" class="secondary cam-pick" disabled title="Selfie / frontal">
+            Frontal
+          </button>
+          <button type="button" id="torchBtn" class="secondary" disabled title="Solo en muchos Android con cámara trasera">
+            Linterna
+          </button>
+        </div>
+        <div class="hud-row zoom-row" id="zoomRow">
+          <label for="zoomSlider">Zoom</label>
+          <input
+            type="range"
+            id="zoomSlider"
+            disabled
+            min="1"
+            max="1"
+            step="0.01"
+            value="1"
+            title="Si tu equipo lo permite (suele verse en Chrome/Android, cámara trasera)"
+          />
+        </div>
+        <div class="hud-row">
+          <button type="button" id="btn" disabled>Iniciando…</button>
+          <button type="button" id="fsBtn" class="secondary" title="Oculta barras del navegador si el sistema lo permite">
+            Pantalla completa
+          </button>
+        </div>
+      </div>
+    </div>
+    <script>
+      const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+
+      const logEl = document.getElementById('log')
+      const btn = document.getElementById('btn')
+      const fsBtn = document.getElementById('fsBtn')
+      const camEnv = document.getElementById('camEnv')
+      const camUser = document.getElementById('camUser')
+      const torchBtn = document.getElementById('torchBtn')
+      const stage = document.getElementById('stage')
+      const pv = document.getElementById('pv')
+      const splash = document.getElementById('splash')
+      const zoomSlider = document.getElementById('zoomSlider')
+
+      /** `environment` = trasera, `user` = frontal (selfie). */
+      let facingModePreference = 'environment'
+      let torchOn = false
+
+      function log(...args) {
+        logEl.textContent = args.map(String).join(' ')
+      }
+
+      function ensureMediaDevicesShim() {
+        if (typeof navigator === 'undefined') return false
+        if (!navigator.mediaDevices) navigator.mediaDevices = {}
+        if (typeof navigator.mediaDevices.getUserMedia === 'function') return true
+        const legacy =
+          navigator.getUserMedia ||
+          navigator.webkitGetUserMedia ||
+          navigator.mozGetUserMedia ||
+          navigator.msGetUserMedia
+        if (!legacy) return false
+        navigator.mediaDevices.getUserMedia = function (constraints) {
+          return new Promise(function (resolve, reject) {
+            legacy.call(navigator, constraints, resolve, reject)
+          })
+        }
+        return true
+      }
+
+      function checkSecureCameraContext() {
+        if (location.protocol === 'https:') return true
+        if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') return true
+        return false
+      }
+
+      /**
+       * Pantalla completa del contenedor `.stage` (vídeo + controles). Si solo se hace fullscreen del `<video>`,
+       * en Android los botones Trasera/Frontal/Linterna pueden quedar fuera del área táctil del fullscreen.
+       */
+      async function tryEnterFullscreen() {
+        const candidates = [stage, pv].filter(Boolean)
+        for (const el of candidates) {
+          try {
+            if (el.requestFullscreen) {
+              await el.requestFullscreen()
+              return
+            }
+            if (el.webkitRequestFullscreen) {
+              await el.webkitRequestFullscreen()
+              return
+            }
+          } catch (_) {
+            /* probá el siguiente candidato */
+          }
+        }
+        /* iOS Safari: suele existir solo en el elemento video */
+        try {
+          if (typeof pv.webkitEnterFullscreen === 'function') {
+            pv.webkitEnterFullscreen()
+          }
+        } catch (_) {}
+      }
+
+      ensureMediaDevicesShim()
+
+      const VIDEO_PRESETS = {
+        high: {
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          frameRate: { ideal: 30, max: 30 }
+        },
+        medium: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 24, max: 30 }
+        },
+        low: {
+          width: { ideal: 854 },
+          height: { ideal: 480 },
+          frameRate: { ideal: 24, max: 24 }
+        }
+      }
+
+      function videoConstraintsFromPreset() {
+        const q = new URLSearchParams(location.search).get('preset') || 'medium'
+        const base = VIDEO_PRESETS[q] || VIDEO_PRESETS.medium
+        return {
+          facingMode: { ideal: facingModePreference },
+          ...base
+        }
+      }
+
+      function syncCamPickUi() {
+        camEnv.classList.toggle('active', facingModePreference === 'environment')
+        camUser.classList.toggle('active', facingModePreference === 'user')
+      }
+
+      /** Linterna: no deshabilitar solo porque getCapabilities no liste torch (Chrome a veces no lo declara hasta probar). */
+      function updateTorchAvailability() {
+        const vt = localStream?.getVideoTracks?.()[0]
+        if (!vt || facingModePreference === 'user') {
+          torchBtn.disabled = true
+          torchBtn.classList.remove('torch-unavailable')
+          if (torchOn && vt) {
+            torchOn = false
+            try {
+              vt.applyConstraints({ advanced: [{ torch: false }] }).catch(() => {})
+            } catch (_) {}
+          }
+          torchBtn.textContent = 'Linterna'
+          torchBtn.title = 'Solo con cámara trasera'
+          return
+        }
+        const caps = typeof vt.getCapabilities === 'function' ? vt.getCapabilities() : {}
+        const reportsTorch = caps.torch === true || caps.torch === 'constant' || caps.torch === 'smooth'
+        torchBtn.disabled = false
+        torchBtn.classList.toggle('torch-unavailable', !reportsTorch)
+        torchBtn.textContent = torchOn ? 'Apagar linterna' : 'Linterna'
+        torchBtn.title = reportsTorch
+          ? torchOn
+            ? 'Apagar linterna'
+            : 'Encender linterna (Android / Chrome)'
+          : 'Probar linterna — en algunos equipos funciona aunque el navegador no la liste.'
+      }
+
+      async function setTorch(on) {
+        const vt = localStream?.getVideoTracks?.()[0]
+        if (!vt || facingModePreference === 'user') return
+        try {
+          await vt.applyConstraints({ advanced: [{ torch: !!on }] })
+          torchOn = !!on
+        } catch (e) {
+          log('Linterna:', e?.message || e)
+          torchOn = false
+        }
+        updateTorchAvailability()
+      }
+
+      /** Zoom: animación suavizada (el hardware a veces igual salta en escalones finos). */
+      let zoomRafId = 0
+      let zoomAnimGoal = null
+      let zoomAnimGeneration = 0
+
+      function cancelZoomAnimation() {
+        zoomAnimGeneration++
+        if (zoomRafId) {
+          cancelAnimationFrame(zoomRafId)
+          zoomRafId = 0
+        }
+        zoomAnimGoal = null
+      }
+
+      /**
+       * Zoom por software vía MediaTrack (Chrome/Android en varios equipos; iPhone/Safari casi nunca).
+       * https://developer.mozilla.org/en-US/docs/Web/API/MediaTrackConstraints/zoom
+       */
+      function updateZoomUi() {
+        cancelZoomAnimation()
+        const vt = localStream?.getVideoTracks?.()[0]
+        if (!vt || !zoomSlider) {
+          if (zoomSlider) zoomSlider.disabled = true
+          return
+        }
+
+        const caps = typeof vt.getCapabilities === 'function' ? vt.getCapabilities() : {}
+        const zc = caps.zoom
+        const hasRange =
+          zc &&
+          typeof zc === 'object' &&
+          typeof zc.min === 'number' &&
+          typeof zc.max === 'number' &&
+          zc.max > zc.min
+
+        if (!hasRange) {
+          zoomSlider.disabled = true
+          zoomSlider.title =
+            'Zoom por software no disponible aquí (proba Chrome en Android; iPhone suele no exponer zoom en web).'
+          return
+        }
+
+        zoomSlider.min = String(zc.min)
+        zoomSlider.max = String(zc.max)
+        zoomSlider.step = String(zc.step != null && zc.step > 0 ? zc.step : Math.max(0.01, (zc.max - zc.min) / 100))
+
+        const settings = typeof vt.getSettings === 'function' ? vt.getSettings() : {}
+        let cur = typeof settings.zoom === 'number' ? settings.zoom : zc.min
+        cur = Math.min(zc.max, Math.max(zc.min, cur))
+        zoomSlider.value = String(cur)
+        zoomSlider.disabled = false
+        zoomSlider.title = `Zoom ${cur.toFixed(2)} · min ${zc.min} · max ${zc.max}`
+      }
+
+      /** Objetivo del deslizador; la animación lo alcanza suavizado frame a frame. */
+      function setZoomGoalFromSlider(rawValue) {
+        if (zoomSlider?.disabled) return
+        const v = Number(rawValue)
+        if (!Number.isFinite(v)) return
+        zoomAnimGoal = v
+        if (!zoomRafId) zoomRafId = requestAnimationFrame(zoomAnimationTick)
+      }
+
+      function zoomAnimationTick() {
+        const gen = zoomAnimGeneration
+        const vt = localStream?.getVideoTracks?.()[0]
+        if (!vt || zoomAnimGoal == null || !zoomSlider || zoomSlider.disabled) {
+          zoomRafId = 0
+          return
+        }
+
+        const caps = typeof vt.getCapabilities === 'function' ? vt.getCapabilities() : {}
+        const zc = caps.zoom
+        if (!zc || typeof zc !== 'object' || typeof zc.min !== 'number' || typeof zc.max !== 'number' || zc.max <= zc.min) {
+          zoomRafId = 0
+          return
+        }
+
+        const settings = typeof vt.getSettings === 'function' ? vt.getSettings() : {}
+        const cur =
+          typeof settings.zoom === 'number' ? settings.zoom : Math.min(zc.max, Math.max(zc.min, zoomAnimGoal))
+        const goal = Math.min(zc.max, Math.max(zc.min, zoomAnimGoal))
+        const delta = goal - cur
+        const threshold = Math.max(0.0008, (zc.max - zc.min) * 0.0004)
+
+        if (Math.abs(delta) <= threshold) {
+          void vt
+            .applyConstraints({ advanced: [{ zoom: goal }] })
+            .then(() => {
+              if (gen !== zoomAnimGeneration) return
+              const z = vt.getSettings?.()?.zoom
+              if (typeof z === 'number' && zoomSlider) zoomSlider.title = `Zoom ${z.toFixed(2)}`
+            })
+            .catch(() => {})
+          zoomRafId = 0
+          return
+        }
+
+        const smoothing = 0.26
+        const next = Math.min(zc.max, Math.max(zc.min, cur + delta * smoothing))
+
+        void vt
+          .applyConstraints({ advanced: [{ zoom: next }] })
+          .then(() => {
+            if (gen !== zoomAnimGeneration) return
+            zoomRafId = requestAnimationFrame(zoomAnimationTick)
+          })
+          .catch(() => {
+            zoomRafId = 0
+          })
+      }
+
+      let ws
+      let cameraId
+      let pc
+      let localStream
+
+      const pendingRemoteIce = []
+
+      function flushRemoteIce() {
+        while (pendingRemoteIce.length && pc?.remoteDescription) {
+          const c = pendingRemoteIce.shift()
+          if (c) pc.addIceCandidate(c).catch(() => {})
+        }
+      }
+
+      let rotationDebounce = null
+
+      /**
+       * Muchos Android no pueden abrir la frontal mientras la trasera sigue en uso.
+       * Orden: preset → solo facingMode → exact → probamos cada videoinput por etiqueta/deviceId.
+       */
+      async function openVideoStreamWithFallbacks() {
+        const attempts = [
+          async () =>
+            navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: videoConstraintsFromPreset()
+            }),
+          async () =>
+            navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: { facingMode: { ideal: facingModePreference } }
+            }),
+          async () =>
+            navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: { facingMode: { exact: facingModePreference } }
+            })
+        ]
+
+        let lastErr
+        for (const run of attempts) {
+          try {
+            return await run()
+          } catch (e) {
+            lastErr = e
+          }
+        }
+
+        try {
+          const list = await navigator.mediaDevices.enumerateDevices()
+          const inputs = list.filter((d) => d.kind === 'videoinput' && d.deviceId)
+          const wantFront = facingModePreference === 'user'
+          const ranked = inputs
+            .map((d) => {
+              const L = (d.label || '').toLowerCase()
+              let score = 0
+              if (wantFront) {
+                if (/front|user|selfie|facial|face/.test(L)) score += 24
+                if (/wide|ultra|macro|tele|back|rear|world|environment/.test(L)) score -= 12
+              } else {
+                if (/back|rear|environment|wide|world|main|photo/.test(L)) score += 24
+                if (/front|user|selfie|facial|face/.test(L)) score -= 12
+              }
+              return { d, score }
+            })
+            .sort((a, b) => b.score - a.score)
+
+          for (const { d } of ranked) {
+            try {
+              return await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: { deviceId: { exact: d.deviceId } }
+              })
+            } catch (_) {
+              try {
+                return await navigator.mediaDevices.getUserMedia({
+                  audio: false,
+                  video: { deviceId: { ideal: d.deviceId } }
+                })
+              } catch (_) {}
+            }
+          }
+        } catch (_) {}
+
+        throw lastErr
+      }
+
+      /**
+       * Sustituye el track de vídeo local (rotación = mismo sensor; facing = liberar cámara antes en Android).
+       */
+      async function swapLocalVideoTrack(reason) {
+        if (!localStream || !pc || !cameraId) {
+          if (reason === 'facing') log('Esperá a que termine de iniciar la transmisión y probá de nuevo.')
+          return
+        }
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          if (reason === 'facing') log('Sin señal al servidor: no se puede cambiar de cámara. Refrescá la página.')
+          return
+        }
+
+        const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video')
+        if (!sender) {
+          if (reason === 'facing') log('No se encontró la pista de vídeo WebRTC.')
+          return
+        }
+
+        let freshStream
+        try {
+          if (reason === 'facing') {
+            const oldVt = localStream.getVideoTracks()[0]
+            if (oldVt) {
+              oldVt.stop()
+              localStream.removeTrack(oldVt)
+            }
+            await sender.replaceTrack(null).catch(() => {})
+            pv.srcObject = localStream
+          }
+
+          freshStream = await openVideoStreamWithFallbacks()
+        } catch (e) {
+          const prefix =
+            reason === 'rotation'
+              ? 'Rotación: no se pudo volver a abrir la cámara:'
+              : 'No se pudo cambiar de cámara:'
+          log(prefix + ' ' + (e?.message || e))
+          return
+        }
+
+        const newVt = freshStream.getVideoTracks()[0]
+        if (!newVt) {
+          freshStream.getTracks().forEach((t) => t.stop())
+          return
+        }
+
+        try {
+          await sender.replaceTrack(newVt)
+        } catch (e) {
+          log('replaceTrack:', e?.message || e)
+          newVt.stop()
+          return
+        }
+
+        if (reason === 'rotation') {
+          const oldVt = localStream.getVideoTracks()[0]
+          if (oldVt) {
+            localStream.removeTrack(oldVt)
+            oldVt.stop()
+          }
+        }
+
+        localStream.addTrack(newVt)
+        pv.srcObject = localStream
+        torchOn = false
+        updateTorchAvailability()
+        updateZoomUi()
+
+        try {
+          const offer = await pc.createOffer({ iceRestart: true })
+          await pc.setLocalDescription(offer)
+          ws.send(JSON.stringify({ type: 'offer', cameraId, sdp: pc.localDescription.sdp }))
+          if (reason === 'rotation') {
+            log('Rotación: cámara nueva enviada a la PC (orientación corregida).')
+          } else if (reason === 'facing') {
+            log('Cámara frontal/trasera actualizada en la PC.')
+          }
+        } catch (e) {
+          log('Oferta tras cambio de cámara:', e?.message || e)
+        }
+      }
+
+      /**
+       * Muchos celus siguen enviando dimensiones “verticales” en el códec aunque ya filmás horizontal.
+       */
+      async function refreshVideoAfterRotation() {
+        await swapLocalVideoTrack('rotation')
+      }
+
+      async function applyFacingChoice(mode) {
+        if (mode !== 'environment' && mode !== 'user') return
+        facingModePreference = mode
+        syncCamPickUi()
+        if (!localStream || !pc) return
+        camEnv.disabled = true
+        camUser.disabled = true
+        try {
+          await swapLocalVideoTrack('facing')
+        } finally {
+          camEnv.disabled = false
+          camUser.disabled = false
+        }
+      }
+
+      function onOrientationOrResize() {
+        if (rotationDebounce) clearTimeout(rotationDebounce)
+        rotationDebounce = setTimeout(() => void refreshVideoAfterRotation(), 500)
+      }
+
+      window.addEventListener('orientationchange', onOrientationOrResize)
+      window.addEventListener('resize', onOrientationOrResize)
+      if (typeof screen !== 'undefined' && screen.orientation?.addEventListener) {
+        screen.orientation.addEventListener('change', onOrientationOrResize)
+      }
+
+      async function startCamera() {
+        if (!cameraId) {
+          log('Esperando ID del estudio… probá de nuevo en un segundo.')
+          return
+        }
+        ensureMediaDevicesShim()
+        if (!navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+          throw new Error(
+            'Tu navegador no expone la cámara aquí. Abrí esta misma página en Chrome (Android) o Safari (iPhone), no dentro de WhatsApp o Facebook (tocá ⋮ → Abrir en navegador).'
+          )
+        }
+        if (!checkSecureCameraContext()) {
+          throw new Error(
+            'La página debe abrirse con HTTPS (la URL debe empezar con https:// como muestra la PC). Si ves http:// o un aviso de sitio no seguro distinto al certificado LAN, corregí la dirección.'
+          )
+        }
+        btn.disabled = true
+        const stream = await openVideoStreamWithFallbacks()
+        pv.srcObject = stream
+        localStream = stream
+        splash.classList.add('hidden')
+        syncCamPickUi()
+        updateTorchAvailability()
+        updateZoomUi()
+
+        pc = new RTCPeerConnection(rtcConfig)
+        stream.getTracks().forEach((t) => pc.addTrack(t, stream))
+
+        pc.onicecandidate = (ev) => {
+          if (!cameraId) return
+          ws.send(JSON.stringify({ type: 'ice', cameraId, candidate: ev.candidate?.toJSON() ?? null }))
+        }
+
+        pc.onconnectionstatechange = () => log('Estado WebRTC:', pc.connectionState)
+
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+        ws.send(JSON.stringify({ type: 'offer', cameraId, sdp: pc.localDescription.sdp }))
+
+        /* Pantalla completa del sistema justo después del gesto del usuario */
+        await tryEnterFullscreen()
+      }
+
+      fsBtn.addEventListener('click', () => {
+        void tryEnterFullscreen()
+      })
+
+      function connectWs() {
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+        ws = new WebSocket(`${proto}//${location.host}`)
+
+        ws.onopen = () => {
+          ws.send(JSON.stringify({ type: 'register', role: 'camera', name: navigator.userAgent }))
+          const pr = new URLSearchParams(location.search).get('preset') || 'medium'
+          ensureMediaDevicesShim()
+          const hasGum =
+            navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function'
+          const secure = checkSecureCameraContext()
+
+          if (!secure) {
+            btn.disabled = true
+            btn.textContent = 'Usá HTTPS'
+            camEnv.disabled = true
+            camUser.disabled = true
+            log(
+              'Sin contexto seguro para la cámara. Copiá la URL que muestra la PC (debe empezar con https://). No uses http:// ni enlaces abiertos desde WhatsApp/Facebook sin Abrir en Chrome/Safari.'
+            )
+            return
+          }
+          if (!hasGum) {
+            btn.disabled = true
+            btn.textContent = 'Navegador incompatible'
+            camEnv.disabled = true
+            camUser.disabled = true
+            log(
+              'Este navegador no permite getUserMedia. Abrí la página en Chrome actualizado (Android) o Safari (iPhone).'
+            )
+            return
+          }
+
+          btn.disabled = false
+          btn.textContent = 'Transmitir (pantalla completa)'
+          camEnv.disabled = false
+          camUser.disabled = false
+          log('Listo. Preset:', pr, '. Tocá Transmitir — la cámara irá a pantalla completa.')
+        }
+
+        ws.onmessage = async (ev) => {
+          const msg = JSON.parse(ev.data)
+
+          if (msg.type === 'host-ready') {
+            if (!pc || !cameraId) return
+            if (pc.connectionState === 'connected' || pc.connectionState === 'connecting') return
+            try {
+              const offer = await pc.createOffer({ iceRestart: true })
+              await pc.setLocalDescription(offer)
+              ws.send(JSON.stringify({ type: 'offer', cameraId, sdp: pc.localDescription.sdp }))
+              log('La PC está lista; renegociando video…')
+            } catch (e) {
+              log('Renegociación WebRTC:', e?.message || e)
+            }
+            return
+          }
+
+          if (msg.type === 'registered') {
+            cameraId = msg.cameraId
+            return
+          }
+
+          if (msg.type === 'answer') {
+            if (!pc) return
+            await pc.setRemoteDescription({ type: 'answer', sdp: msg.sdp })
+            flushRemoteIce()
+            return
+          }
+
+          if (msg.type === 'ice') {
+            if (!msg.candidate) return
+            const c = new RTCIceCandidate(msg.candidate)
+            if (!pc?.remoteDescription) {
+              pendingRemoteIce.push(c)
+              return
+            }
+            await pc.addIceCandidate(c).catch(() => {})
+          }
+        }
+
+        ws.onclose = () => log('Señalización cerrada. Refrescá la página.')
+
+        ws.onerror = () => log('Error de red / WebSocket.')
+      }
+
+      btn.addEventListener('click', async () => {
+        try {
+          await startCamera()
+          btn.disabled = true
+          btn.textContent = 'Transmitiendo…'
+        } catch (e) {
+          log('No se pudo usar la cámara:', e?.message || e)
+          btn.disabled = false
+        }
+      })
+
+      camEnv.addEventListener('click', () => void applyFacingChoice('environment'))
+      camUser.addEventListener('click', () => void applyFacingChoice('user'))
+      torchBtn.addEventListener('click', () => void setTorch(!torchOn))
+
+      zoomSlider.addEventListener('input', (e) => {
+        setZoomGoalFromSlider(e.target.value)
+      })
+
+      connectWs()
+    </script>
+  </body>
+</html>
