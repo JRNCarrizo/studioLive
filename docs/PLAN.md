@@ -1,6 +1,6 @@
 # Studio Live — plan del producto (multicámara local)
 
-**Para retomar el trabajo:** en nuevas conversaciones, pedir al asistente que lea este archivo primero (`docs/PLAN.md`).
+**Para retomar el trabajo:** pedir al asistente que lea **`docs/PLAN.md`** (visión y stack) y **`docs/HISTORIAL_IMPLEMENTACION.md`** (qué está hecho en código: fusión, MP4, GitHub, etc.).
 
 ## Visión
 
@@ -62,4 +62,4 @@ En la carpeta del proyecto: `npm install` y `npm run dev`. En la ventana aparece
 
 ---
 
-*Última actualización: arranque del MVP Electron/WebRTC.*
+*Última actualización: ver también `docs/HISTORIAL_IMPLEMENTACION.md` para el estado detallado del código.*
