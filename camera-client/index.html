@@ -280,6 +280,36 @@
         }
       }
 
+      /** Tope por preset para el codificador WebRTC (reduce tirones por congestión Wi‑Fi con varios celulares). */
+      const PRESET_MAX_WEBRTC_BITRATE = {
+        high: 3_000_000,
+        medium: 1_600_000,
+        low: 900_000
+      }
+
+      async function applyOutboundVideoBitrateCap(pc) {
+        const q = new URLSearchParams(location.search).get('preset') || 'medium'
+        const maxBitrate = PRESET_MAX_WEBRTC_BITRATE[q] ?? PRESET_MAX_WEBRTC_BITRATE.medium
+        const sender = pc.getSenders().find((s) => s.track && s.track.kind === 'video')
+        if (!sender || typeof sender.getParameters !== 'function') return
+        try {
+          const params = sender.getParameters()
+          if (!params.encodings || !params.encodings.length) {
+            params.encodings = [{}]
+          }
+          params.encodings[0].maxBitrate = maxBitrate
+          await sender.setParameters(params)
+        } catch (_) {
+          /* Algunos builds ignoran o fallan hasta el primer keyframe. */
+        }
+      }
+
+      /** Debe coincidir con la pestaña activa en la PC (`studioWorkspace=live` | `liveFusion`). */
+      function studioWorkspaceFromSearch() {
+        const q = new URLSearchParams(location.search).get('studioWorkspace')
+        return q === 'liveFusion' ? 'liveFusion' : 'live'
+      }
+
       function videoConstraintsFromPreset() {
         const q = new URLSearchParams(location.search).get('preset') || 'medium'
         const base = VIDEO_PRESETS[q] || VIDEO_PRESETS.medium
@@ -603,6 +633,8 @@
         updateTorchAvailability()
         updateZoomUi()
 
+        await applyOutboundVideoBitrateCap(pc)
+
         try {
           const offer = await pc.createOffer({ iceRestart: true })
           await pc.setLocalDescription(offer)
@@ -677,6 +709,7 @@
 
         pc = new RTCPeerConnection(rtcConfig)
         stream.getTracks().forEach((t) => pc.addTrack(t, stream))
+        await applyOutboundVideoBitrateCap(pc)
 
         pc.onicecandidate = (ev) => {
           if (!cameraId) return
@@ -702,7 +735,15 @@
         ws = new WebSocket(`${proto}//${location.host}`)
 
         ws.onopen = () => {
-          ws.send(JSON.stringify({ type: 'register', role: 'camera', name: navigator.userAgent }))
+          const wsMode = studioWorkspaceFromSearch()
+          ws.send(
+            JSON.stringify({
+              type: 'register',
+              role: 'camera',
+              name: navigator.userAgent,
+              workspace: wsMode
+            })
+          )
           const pr = new URLSearchParams(location.search).get('preset') || 'medium'
           ensureMediaDevicesShim()
           const hasGum =
@@ -734,7 +775,13 @@
           btn.textContent = 'Transmitir (pantalla completa)'
           camEnv.disabled = false
           camUser.disabled = false
-          log('Listo. Preset:', pr, '. Tocá Transmitir — la cámara irá a pantalla completa.')
+          log(
+            'Listo. Preset:',
+            pr,
+            '· modo PC:',
+            wsMode === 'liveFusion' ? 'Fusión en vivo' : 'Sesión en vivo',
+            '. Tocá Transmitir — la cámara irá a pantalla completa.'
+          )
         }
 
         ws.onmessage = async (ev) => {

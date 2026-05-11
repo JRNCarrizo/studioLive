@@ -8,12 +8,20 @@ import { WebSocketServer } from 'ws'
 
 export type IceCandidatePayload = Record<string, unknown> | null
 
+/** Celular: misma URL base que «Sesión en vivo» pero `studioWorkspace=liveFusion` para no mezclar con ISO. */
+export type CameraStudioWorkspace = 'live' | 'liveFusion'
+
 export type SignalingMsg =
-  | { type: 'register'; role: 'host' | 'camera'; name?: string }
+  | { type: 'register'; role: 'host' | 'camera'; name?: string; workspace?: CameraStudioWorkspace }
   | { type: 'registered'; cameraId: string }
-  | { type: 'camera-joined'; cameraId: string; name?: string }
+  | {
+      type: 'camera-joined'
+      cameraId: string
+      name?: string
+      workspace: CameraStudioWorkspace
+    }
   | { type: 'camera-left'; cameraId: string }
-  | { type: 'offer'; cameraId: string; sdp: string }
+  | { type: 'offer'; cameraId: string; sdp: string; workspace?: CameraStudioWorkspace }
   | { type: 'answer'; cameraId: string; sdp: string }
   | { type: 'ice'; cameraId: string; candidate: IceCandidatePayload }
   | { type: 'host-ready' }
@@ -93,6 +101,11 @@ export async function createSignalingServer(opts: {
 
   const cameras = new Map<string, WebSocket>()
   const cameraNames = new Map<string, string>()
+  const cameraWorkspaces = new Map<string, CameraStudioWorkspace>()
+
+  function normalizeCameraWorkspace(raw: unknown): CameraStudioWorkspace {
+    return raw === 'liveFusion' ? 'liveFusion' : 'live'
+  }
 
   function send(ws: WebSocket, msg: SignalingMsg) {
     if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(msg))
@@ -192,10 +205,12 @@ export async function createSignalingServer(opts: {
         if (msg.role === 'host') return
 
         const cameraId = randomId()
+        const workspace = normalizeCameraWorkspace(msg.workspace)
         cameras.set(cameraId, ws)
         cameraNames.set(cameraId, msg.name ?? '')
+        cameraWorkspaces.set(cameraId, workspace)
         send(ws, { type: 'registered', cameraId })
-        enqueueToHost({ type: 'camera-joined', cameraId, name: msg.name })
+        enqueueToHost({ type: 'camera-joined', cameraId, name: msg.name, workspace })
         ws.on('close', () => {
           cameras.delete(cameraId)
           cameraNames.delete(cameraId)
@@ -205,7 +220,8 @@ export async function createSignalingServer(opts: {
       }
 
       if (msg.type === 'offer') {
-        enqueueToHost(msg)
+        const ws = cameraWorkspaces.get(msg.cameraId) ?? 'live'
+        enqueueToHost({ type: 'offer', cameraId: msg.cameraId, sdp: msg.sdp, workspace: ws })
         return
       }
 

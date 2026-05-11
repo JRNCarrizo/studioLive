@@ -176,6 +176,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
   const rafRef = useRef<number>(0)
   /** Para handlers de `<video>` miniatura (onLoadedData): el estado `playing` del closure a veces va atrasado. */
   const playingRef = useRef(false)
+  const fusionRecordingRef = useRef(false)
   /** Tiempo de línea maestra al iniciar «Grabar fusión» (para alinear vista previa WebM con las pistas). */
   const fusionRecordStartSecRef = useRef(0)
   const fusionPreviewVideoRef = useRef<HTMLVideoElement | null>(null)
@@ -209,7 +210,8 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
 
   useEffect(() => {
     playingRef.current = playing
-  }, [playing])
+    fusionRecordingRef.current = fusionRecording
+  }, [playing, fusionRecording])
 
   useEffect(() => {
     fusionPreviewUrlUnmountRef.current = fusionPreviewUrl
@@ -438,11 +440,13 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
 
       for (const c of clips) {
         const v = videoRefs.current.get(c.cameraId)
-        if (v && Math.abs(v.currentTime - t) > 0.25) v.currentTime = t
+        if (v && !v.ended && Math.abs(v.currentTime - t) > 0.25) v.currentTime = t
         const th = thumbVideoRefs.current.get(c.cameraId)
         if (th) {
-          if (Math.abs(th.currentTime - t) > 0.25) th.currentTime = t
-          if (th.paused) void th.play().catch(() => {})
+          /** Miniatura: umbral más holgado que la ISO grande (menos “temblor” por jitter del decodificador). */
+          if (!th.ended && Math.abs(th.currentTime - t) > 0.38) th.currentTime = t
+          /** `play()` con `ended` rebobina al inicio → loop con el seek al final del maestro. */
+          if (th.paused && !th.ended) void th.play().catch(() => {})
         }
       }
       if (audioRef.current && audioUrl && master !== audioRef.current) {
@@ -464,7 +468,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
       const t = master.currentTime
       for (const c of clips) {
         const th = thumbVideoRefs.current.get(c.cameraId)
-        if (!th) continue
+        if (!th || th.ended) continue
         if (Math.abs(th.currentTime - t) > 0.05) th.currentTime = t
         void th.play().catch(() => {})
       }
@@ -624,20 +628,25 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
     seek(fusionRecordStartSecRef.current)
   }, [fusionPreviewUrl, clips.length, seek])
 
-  /** Al mostrar miniaturas o mover la línea de tiempo, alinear los vídeos pequeños al mismo instante. */
+  /**
+   * Alinear miniaturas al tiempo de la barra cuando NO estás en play.
+   * En play, `currentTime` se actualiza ~cada 100 ms y este efecto con umbral 0.05 peleaba con el tick
+   * (0.25 en ISO / lógica distinta en thumbs) → seeks en bucle en una miniatura; tras varias vistas previa canceladas se notaba más.
+   */
   useEffect(() => {
     if (selectorMode !== 'thumbnails' || !clips.length) return
+    if (playing) return
     const id = window.requestAnimationFrame(() => {
       const t = currentTime
       for (const c of clips) {
         const th = thumbVideoRefs.current.get(c.cameraId)
-        if (th && Number.isFinite(t) && Math.abs(th.currentTime - t) > 0.05) {
+        if (th && !th.ended && Number.isFinite(t) && Math.abs(th.currentTime - t) > 0.05) {
           th.currentTime = t
         }
       }
     })
     return () => cancelAnimationFrame(id)
-  }, [selectorMode, clips, currentTime])
+  }, [selectorMode, clips, currentTime, playing])
 
   /** Cierra MediaRecorder y deja la barra de plan + vista previa WebM en memoria (aún no guarda en disco). */
   const stopFusionRecord = useCallback(async () => {
@@ -679,6 +688,26 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
       'Grabación lista: revisá la vista previa, mové el tiempo en la barra o el control y guardá cuando quieras.'
     )
   }, [fusionPreviewUrl, getMasterTime, onStatus, openFusionSeg, pauseAll, sessionId])
+
+  /** Fin de la pista maestra: si `playing` queda true, el tick sigue haciendo play/seek en miniaturas `ended` → salto en bucle. */
+  useEffect(() => {
+    if (fusionPreviewUrl || !clips.length) return
+    const master =
+      audioUrl && audioRef.current ? audioRef.current : videoRefs.current.get(clips[0]!.cameraId)
+    if (!master || typeof master.addEventListener !== 'function') return
+
+    const onEnded = () => {
+      const rec = recRef.current
+      if (fusionRecordingRef.current && rec && rec.state === 'recording') {
+        void stopFusionRecord()
+        return
+      }
+      pauseAll()
+    }
+
+    master.addEventListener('ended', onEnded)
+    return () => master.removeEventListener('ended', onEnded)
+  }, [fusionPreviewUrl, clips.length, audioUrl, pauseAll, stopFusionRecord])
 
   const saveFusionPreviewToDisk = useCallback(async () => {
     const blob = fusionPreviewBlobRef.current
@@ -747,7 +776,20 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
     setFusionExportFileName('')
     setFusionSegmentsDone([])
     onStatus('Vista previa descartada (no se guardó el archivo).')
-  }, [fusionPreviewUrl, onStatus])
+    queueMicrotask(() => {
+      if (!playingRef.current || selectorMode !== 'thumbnails' || !clips.length) return
+      const master =
+        audioUrl && audioRef.current ? audioRef.current : videoRefs.current.get(clips[0]!.cameraId)
+      if (!master || !Number.isFinite(master.currentTime)) return
+      const t = master.currentTime
+      for (const c of clips) {
+        const th = thumbVideoRefs.current.get(c.cameraId)
+        if (!th || th.ended) continue
+        if (Math.abs(th.currentTime - t) > 0.06) th.currentTime = t
+        if (th.paused && !th.ended) void th.play().catch(() => {})
+      }
+    })
+  }, [fusionPreviewUrl, onStatus, clips, audioUrl, selectorMode])
 
   const toggleFusionPreviewFullscreen = useCallback(() => {
     const wrap = fusionPreviewWrapRef.current
@@ -823,12 +865,17 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
     const aEl = audioRef.current
     if (aEl && audioUrl) {
       try {
-        const cap = aEl.captureStream()
-        const aTrack = cap.getAudioTracks()[0]
-        if (aTrack) {
-          outStream = new MediaStream([vidTrack, aTrack])
-        } else {
+        /** `captureStream` en audio existe en Chromium; los typings de `HTMLAudioElement` a veces no lo declaran. */
+        const cap = (aEl as HTMLMediaElement & { captureStream?: () => MediaStream }).captureStream?.()
+        if (!cap) {
           outStream = new MediaStream([vidTrack])
+        } else {
+          const aTrack = cap.getAudioTracks()[0]
+          if (aTrack) {
+            outStream = new MediaStream([vidTrack, aTrack])
+          } else {
+            outStream = new MediaStream([vidTrack])
+          }
         }
       } catch {
         outStream = new MediaStream([vidTrack])
@@ -1557,7 +1604,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
                           if (master && Number.isFinite(master.currentTime)) {
                             th.currentTime = master.currentTime
                           }
-                          if (playingRef.current) {
+                          if (playingRef.current && !th.ended) {
                             void th.play().catch(() => {})
                           }
                         }}

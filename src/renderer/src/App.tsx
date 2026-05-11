@@ -1,12 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { FusionPanel } from './FusionPanel'
+import { LiveFusionPanel } from './LiveFusionPanel'
+
+type StudioCameraWorkspace = 'live' | 'liveFusion'
+
+type WorkspaceMode = 'live' | 'liveFusion' | 'fusion'
 
 type SigMsg =
-  | { type: 'camera-joined'; cameraId: string; name?: string }
+  | { type: 'camera-joined'; cameraId: string; name?: string; workspace?: StudioCameraWorkspace }
   | { type: 'camera-left'; cameraId: string }
-  | { type: 'offer'; cameraId: string; sdp: string }
+  | { type: 'offer'; cameraId: string; sdp: string; workspace?: StudioCameraWorkspace }
   | { type: 'ice'; cameraId: string; candidate: RTCIceCandidateInit | null }
+
+function normalizeStudioWorkspace(raw: unknown): StudioCameraWorkspace {
+  return raw === 'liveFusion' ? 'liveFusion' : 'live'
+}
+
+function cameraMatchesWorkspace(camWs: StudioCameraWorkspace, mode: WorkspaceMode): boolean {
+  if (mode === 'fusion') return false
+  if (mode === 'live') return camWs === 'live'
+  if (mode === 'liveFusion') return camWs === 'liveFusion'
+  return false
+}
 
 const HOST_PANEL_HTTP_FALLBACK = 3777
 
@@ -56,11 +72,16 @@ function folderLeafFromPath(fullPath: string): string {
   return i >= 0 ? t.slice(i + 1) : t
 }
 
+/**
+ * VP8 delante: al grabar varias ISO a la vez el PC re-codifica cada pista; VP9 suele cargar más el CPU y favorecer fotogramas caídos.
+ * (Misma idea que la fusión en `FusionPanel.tsx`.)
+ */
 function pickRecorderMime(): string | undefined {
   const candidates = [
-    'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8,opus',
+    'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8',
+    'video/webm;codecs=vp9',
     'video/webm'
   ]
   if (typeof MediaRecorder === 'undefined') return undefined
@@ -80,6 +101,22 @@ const pcAudioConstraints = {
 } as const
 
 type VideoPresetId = 'high' | 'medium' | 'low'
+
+/** Bitrate objetivo del WebM ISO en PC (alineado al preset de URL del celular). */
+function isoVideoBitsPerSecondForPreset(preset: VideoPresetId): number {
+  switch (preset) {
+    case 'high':
+      return 4_000_000
+    case 'medium':
+      return 2_500_000
+    case 'low':
+      return 1_200_000
+    default:
+      return 2_500_000
+  }
+}
+
+const ISO_AUDIO_BITS_PER_SECOND = 160_000
 
 const VIDEO_PRESET_OPTIONS: {
   id: VideoPresetId
@@ -139,7 +176,8 @@ export default function App() {
   /** Tiempo ISO transcurrido mostrado (00:00 o H:MM:SS). */
   const [isoElapsedLabel, setIsoElapsedLabel] = useState('00:00')
   /** Separar flujo de celulares + ISO del flujo de edición de fusión (evita mezclar sesiones). */
-  const [workspaceMode, setWorkspaceMode] = useState<'live' | 'fusion'>('live')
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('live')
+  const workspaceModeRef = useRef<WorkspaceMode>('live')
 
   const bumpRotate = useCallback((id: string) => {
     setManualRotateDeg((prev) => ({
@@ -159,12 +197,19 @@ export default function App() {
   /** Inicio de la grabación ISO actual (para cronómetro). */
   const isoRecordingStartedAtRef = useRef<number | null>(null)
 
+  useEffect(() => {
+    workspaceModeRef.current = workspaceMode
+  }, [workspaceMode])
+
   const urls = useMemo(() => {
     if (!info) return []
+    if (workspaceMode === 'fusion') return []
+    const wsParam = workspaceMode === 'liveFusion' ? 'liveFusion' : 'live'
     return info.ips.map(
-      (ip) => `https://${ip}:${info.port}/?preset=${encodeURIComponent(videoPreset)}`
+      (ip) =>
+        `https://${ip}:${info.port}/?preset=${encodeURIComponent(videoPreset)}&studioWorkspace=${wsParam}`
     )
-  }, [info, videoPreset])
+  }, [info, videoPreset, workspaceMode])
 
   const pingUrls = useMemo(() => {
     if (!info) return []
@@ -173,8 +218,10 @@ export default function App() {
 
   const localPreviewUrl = useMemo(() => {
     if (!info) return ''
-    return `https://127.0.0.1:${info.port}/?preset=${encodeURIComponent(videoPreset)}`
-  }, [info, videoPreset])
+    if (workspaceMode === 'fusion') return ''
+    const wsParam = workspaceMode === 'liveFusion' ? 'liveFusion' : 'live'
+    return `https://127.0.0.1:${info.port}/?preset=${encodeURIComponent(videoPreset)}&studioWorkspace=${wsParam}`
+  }, [info, videoPreset, workspaceMode])
 
   /** Evita tiles vacíos si el video llega antes que el estado camera-joined */
   const tileCameraIds = useMemo(() => {
@@ -267,9 +314,30 @@ export default function App() {
     })
   }, [])
 
-  const handleOffer = useCallback(async (cameraId: string, sdp: string) => {
+  /** Una sola pestaña «activa» para las cámaras: al cambiar se cierran los PeerConnections en la PC. */
+  const workspaceSwitchSkipRef = useRef(true)
+  useEffect(() => {
+    if (workspaceSwitchSkipRef.current) {
+      workspaceSwitchSkipRef.current = false
+      return
+    }
+    for (const id of [...pcsRef.current.keys()]) {
+      closeCamera(id)
+    }
+    setExpandedCameraId(null)
+    setStatus(
+      'Pestaña cambiada: se cerraron las conexiones WebRTC de la sesión anterior. En cada celular abrí la URL que muestra esta pestaña y tocá Transmitir.'
+    )
+  }, [workspaceMode, closeCamera])
+
+  const handleOffer = useCallback(async (cameraId: string, sdp: string, workspaceRaw?: StudioCameraWorkspace) => {
     // No usar signalingOkRef aquí: si la insignia «Señalización» falla pero el IPC sí entrega ofertas,
     // hay que negociar igual o el celular queda en «Transmitiendo» sin video en la PC.
+
+    const camWs = normalizeStudioWorkspace(workspaceRaw)
+    if (!cameraMatchesWorkspace(camWs, workspaceModeRef.current)) {
+      return
+    }
 
     const prev = pcsRef.current.get(cameraId)
     if (prev) prev.close()
@@ -362,6 +430,15 @@ export default function App() {
       if (msg.type === 'camera-joined') {
         signalingOkRef.current = true
         setSignalingReady(true)
+        const camWs = normalizeStudioWorkspace(msg.workspace)
+        if (!cameraMatchesWorkspace(camWs, workspaceModeRef.current)) {
+          setStatus(
+            `Un celular se registró con otra URL de modo (${camWs === 'liveFusion' ? 'Fusión en vivo' : 'Sesión en vivo'}). Esta pestaña usa ${
+              workspaceModeRef.current === 'liveFusion' ? 'Fusión en vivo' : workspaceModeRef.current === 'live' ? 'Sesión en vivo' : 'archivos'
+            } — abrí la URL correcta o cambiá de pestaña.`
+          )
+          return
+        }
         setCameras((prev) => (prev.includes(msg.cameraId) ? prev : [...prev, msg.cameraId]))
         setLaneRtcState((prev) => ({
           ...prev,
@@ -377,7 +454,7 @@ export default function App() {
         signalingOkRef.current = true
         setSignalingReady(true)
         try {
-          await handleOffer(msg.cameraId, msg.sdp)
+          await handleOffer(msg.cameraId, msg.sdp, msg.workspace)
         } catch (e) {
           console.error(e)
           setStatus(
@@ -607,6 +684,7 @@ export default function App() {
 
     const videoMime = pickRecorderMime()
     const audioMime = pickAudioRecorderMime()
+    const isoVideoBps = isoVideoBitsPerSecondForPreset(videoPreset)
     sessionRef.current = Date.now()
     chunksRef.current = new Map()
     recordersRef.current = new Map()
@@ -623,13 +701,14 @@ export default function App() {
         chunksRef.current.set(id, chunks)
 
         const rec = videoMime
-          ? new MediaRecorder(stream, { mimeType: videoMime })
-          : new MediaRecorder(stream)
+          ? new MediaRecorder(stream, { mimeType: videoMime, videoBitsPerSecond: isoVideoBps })
+          : new MediaRecorder(stream, { videoBitsPerSecond: isoVideoBps })
         rec.ondataavailable = (e) => {
           if (e.data.size) chunks.push(e.data)
         }
         recordersRef.current.set(id, rec)
-        rec.start(250)
+        /** Chunk cada 500 ms: menos callbacks al hilo principal que 250 ms (varias cámaras a la vez). */
+        rec.start(500)
       }
 
       if (audioStream?.getAudioTracks().length) {
@@ -637,13 +716,16 @@ export default function App() {
         const chunks: BlobPart[] = []
         chunksRef.current.set(PC_AUDIO_RECORDER_KEY, chunks)
         const rec = audioMime
-          ? new MediaRecorder(audioStream, { mimeType: audioMime })
-          : new MediaRecorder(audioStream)
+          ? new MediaRecorder(audioStream, {
+              mimeType: audioMime,
+              audioBitsPerSecond: ISO_AUDIO_BITS_PER_SECOND
+            })
+          : new MediaRecorder(audioStream, { audioBitsPerSecond: ISO_AUDIO_BITS_PER_SECOND })
         rec.ondataavailable = (e) => {
           if (e.data.size) chunks.push(e.data)
         }
         recordersRef.current.set(PC_AUDIO_RECORDER_KEY, rec)
-        rec.start(250)
+        rec.start(500)
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -673,7 +755,7 @@ export default function App() {
     setStatus(
       'Grabación ISO en curso: se guarda un WebM por cada cámara en vivo + audio de PC si está activo. Detené para escribir los archivos.'
     )
-  }, [audioStream, outputDir, pendingIsoSave, streams])
+  }, [audioStream, outputDir, pendingIsoSave, streams, videoPreset])
 
   const toggleRecord = async () => {
     try {
@@ -756,6 +838,43 @@ export default function App() {
           <button
             type="button"
             role="tab"
+            aria-selected={workspaceMode === 'liveFusion'}
+            onClick={() => {
+              if (isoBusy) {
+                setStatus(
+                  pendingIsoSave
+                    ? 'Guardá o descartá la grabación ISO pendiente antes de pasar a Fusión en vivo.'
+                    : 'Detené la grabación ISO antes de pasar a Fusión en vivo.'
+                )
+                return
+              }
+              setWorkspaceMode('liveFusion')
+            }}
+            disabled={isoBusy}
+            title={
+              isoBusy
+                ? pendingIsoSave
+                  ? 'Guardá o descartá la grabación antes de usar Fusión en vivo'
+                  : 'No podés cambiar de pestaña mientras graba ISO'
+                : 'Mezcla en vivo con los celulares (URL distinta a Sesión en vivo)'
+            }
+            style={{
+              padding: '6px 12px',
+              borderRadius: 8,
+              border:
+                workspaceMode === 'liveFusion' ? '2px solid #14b8a6' : '1px solid #334155',
+              background: workspaceMode === 'liveFusion' ? '#134e4a' : '#0f172a',
+              color: '#e2e8f0',
+              fontSize: 12,
+              fontWeight: workspaceMode === 'liveFusion' ? 700 : 500,
+              opacity: isoBusy ? 0.45 : 1
+            }}
+          >
+            2 · Fusión en vivo
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={workspaceMode === 'fusion'}
             onClick={() => {
               if (isoBusy) {
@@ -788,7 +907,7 @@ export default function App() {
               opacity: isoBusy ? 0.45 : 1
             }}
           >
-            2 · Fusión
+            3 · Fusión (archivos)
           </button>
         </div>
         <span
@@ -875,7 +994,13 @@ export default function App() {
               {VIDEO_PRESET_OPTIONS.find((o) => o.id === videoPreset)?.hint}
             </span>
           </div>
-          {!urls.length ? (
+          {workspaceMode === 'fusion' ? (
+            <div style={{ marginTop: 10, fontSize: 12, color: '#78716c', maxWidth: 560 }}>
+              Esta pestaña es solo para archivos: no hay URL de celular. Para transmitir, abrí la pestaña{' '}
+              <strong style={{ color: '#cbd5e1' }}>Sesión en vivo</strong> o <strong style={{ color: '#cbd5e1' }}>Fusión en vivo</strong>{' '}
+              y copiá la dirección que lista ahí (cada una lleva un parámetro distinto).
+            </div>
+          ) : !urls.length ? (
             <div>No se detectaron IPs de LAN (¿Wi-Fi desconectado?).</div>
           ) : (
             urls.map((u) => (
@@ -1250,6 +1375,21 @@ export default function App() {
         ) : null}
         </div>
 
+        <div style={{ display: workspaceMode === 'liveFusion' ? 'block' : 'none' }}>
+          <LiveFusionPanel
+            cameraIds={tileCameraIds}
+            streams={streams}
+            rtcStates={laneRtcState}
+            manualRotateDeg={manualRotateDeg}
+            onRotate90={bumpRotate}
+            outputDir={outputDir}
+            audioStream={audioStream}
+            onStatus={setStatus}
+            isoBusy={isoBusy}
+            onPickOutputDir={() => void pickFolder()}
+          />
+        </div>
+
         <div style={{ display: workspaceMode === 'fusion' ? 'block' : 'none' }}>
           <div
             style={{
@@ -1264,7 +1404,7 @@ export default function App() {
               alignItems: 'center'
             }}
           >
-            <span style={{ fontSize: 12, fontWeight: 700, color: '#e9d5ff' }}>Modo Fusión (paso 2)</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#e9d5ff' }}>Modo Fusión · archivos (paso 3)</span>
             <span style={{ fontSize: 11, color: '#94a3b8', flex: '1 1 200px', lineHeight: 1.4 }}>
               Acá cargás los <code style={{ color: '#cbd5e1' }}>cam-*.webm</code> ya grabados. Las URLs de celulares y la
               cuadrícula en vivo están ocultas para no mezclar con una sesión nueva.

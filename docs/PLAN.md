@@ -37,6 +37,8 @@ En fases posteriores: herramientas de edición y **IA** (automatización de camb
 - **Cliente en celular (hoy):** **página web** en **`https://<IP-PC>:<puerto>/`** (TLS autofirmado en LAN; el navegador pide confiar la primera vez). Señalización **WSS** en el mismo puerto.
 - **Puerto:** intenta **8788** y reintenta hasta **8797** si está ocupado.
 - **Audio en PC:** **getUserMedia** (entrada predeterminada de Windows o dispositivo elegido en la app). Chromium **no expone ASIO**; suele ser **WASAPI**. Eco-cancelación / AGC / reducción de ruido desactivados en código para favorecer señal “limpia” desde interfaz.
+- **Preset `?preset=` (alta / media / baja):** en el **celular** ajusta resolución/fps vía `getUserMedia` y aplica un **tope `maxBitrate`** en el sender WebRTC (orden ~**3 / 1,6 / 0,9 Mbps**) para reducir congestión con varios streams en Wi‑Fi.
+- **Grabación ISO en PC:** cada `cam-*.webm` sale de **MediaRecorder** sobre el stream recibido; se prioriza códec **VP8** frente a VP9 para **menos CPU** al re-codificar varias pistas a la vez; **`videoBitsPerSecond`** alineado al preset (orden ~**4 / 2,5 / 1,2 Mbps**), audio PC ~**160 kbps**, chunks **`rec.start(500)`** (500 ms) para no saturar el hilo principal.
 
 ## Pendientes próximos
 
