@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
+import { useCameraAliases } from './cameraAliases'
 import {
   btnAudio,
   btnNeutral,
@@ -245,6 +246,7 @@ export function LiveFusionPanel({
   onOpenAudio,
   hasPcAudio
 }: LiveFusionPanelProps) {
+  const cameraAliases = useCameraAliases()
   const [mixMode, setMixMode] = useState<LiveMixMode>('manual')
   const [programCameraId, setProgramCameraId] = useState<string | null>(null)
   const [programRecording, setProgramRecording] = useState(false)
@@ -687,6 +689,47 @@ export function LiveFusionPanel({
     onStatus('Vista previa del programa descartada.')
   }, [onStatus])
 
+  /**
+   * Cancela el flujo del programa: si hay grabación en curso, descarta lo grabado sin generar vista previa;
+   * si hay una vista previa pendiente, la descarta. Pide confirmación.
+   * No borra archivos del disco ya guardados.
+   */
+  const cancelProgramFlow = useCallback(() => {
+    if (exportBusy) {
+      onStatus('Esperá a que termine la exportación antes de cancelar.')
+      return
+    }
+    if (!programRecording && !programBlob) return
+
+    const msg = programRecording
+      ? '¿Cancelar la grabación del programa?\n\nSe va a descartar lo grabado en esta toma (no se genera vista previa ni se guarda nada en disco).'
+      : '¿Descartar la vista previa del programa?\n\nNo se va a guardar el WebM ni el MP4.'
+    const ok = window.confirm(msg)
+    if (!ok) return
+
+    const rec = recRef.current
+    if (rec && rec.state !== 'inactive') {
+      try {
+        rec.ondataavailable = null
+        rec.onstop = null
+      } catch {
+        /* vacío */
+      }
+      try {
+        rec.stop()
+      } catch {
+        /* vacío */
+      }
+    }
+    recRef.current = null
+    chunksRef.current = []
+    programRecordingStartedAtRef.current = null
+    setProgramRecording(false)
+    setProgramBlob(null)
+    setExportFileName('')
+    onStatus('Grabación del programa cancelada (no se guardó nada).')
+  }, [exportBusy, onStatus, programBlob, programRecording])
+
   const disabledProgramRec = isoBusy || !cameraIds.length
 
   return (
@@ -886,7 +929,7 @@ export function LiveFusionPanel({
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                           {cameraIds.map((cid) => (
                             <label key={cid} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                              <span style={{ minWidth: 72, color: '#64748b', wordBreak: 'break-word' }}>{cid}</span>
+                              <span style={{ minWidth: 72, color: '#64748b', wordBreak: 'break-word' }}>{cameraAliases.resolve(cid)}</span>
                               <input
                                 type="number"
                                 min={1}
@@ -958,7 +1001,32 @@ export function LiveFusionPanel({
                   cursor: programRecording ? 'pointer' : 'not-allowed'
                 }}
               >
-                Detener grabación
+                Finalizar grabación
+              </button>
+              <button
+                type="button"
+                disabled={(!programRecording && !programBlob) || exportBusy}
+                onClick={() => cancelProgramFlow()}
+                title={
+                  programRecording
+                    ? 'Descarta la toma actual sin guardar (no genera vista previa).'
+                    : programBlob
+                      ? 'Descarta la vista previa pendiente sin guardarla.'
+                      : 'No hay grabación ni vista previa para cancelar.'
+                }
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  border: '1px solid #475569',
+                  background: '#1f2937',
+                  color: '#e2e8f0',
+                  fontWeight: 600,
+                  cursor:
+                    (!programRecording && !programBlob) || exportBusy ? 'not-allowed' : 'pointer',
+                  opacity: (!programRecording && !programBlob) || exportBusy ? 0.45 : 1
+                }}
+              >
+                Cancelar
               </button>
               {programRecording ? (
                 <span
@@ -1194,7 +1262,7 @@ export function LiveFusionPanel({
                     onClick={() => pickProgram(id)}
                     title={
                       mixMode === 'manual'
-                        ? `Programa: ${id}`
+                        ? `Programa: ${cameraAliases.resolve(id)}`
                         : 'En automático la toma la elige el director; pasá a Manual para elegir vos.'
                     }
                     style={{
@@ -1238,8 +1306,9 @@ export function LiveFusionPanel({
                         textAlign: 'center',
                         wordBreak: 'break-word'
                       }}
+                      title={cameraAliases.aliases[id] ? `ID interno: ${id}` : undefined}
                     >
-                      {id}
+                      {cameraAliases.resolve(id)}
                     </div>
                     <div style={{ fontSize: 9, color: '#64748b', textAlign: 'center' }}>
                       {rtcStates[id] ?? '—'}

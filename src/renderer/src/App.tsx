@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { useCameraAliases } from './cameraAliases'
 import { FloatingPcAudioPanel, readStoredPcAudioGainPercent } from './FloatingPcAudioPanel'
 import { FusionPanel } from './FusionPanel'
 import { LiveFusionPanel } from './LiveFusionPanel'
@@ -181,6 +182,8 @@ export default function App() {
   const [videoPreset, setVideoPreset] = useState<VideoPresetId>('medium')
   const [signalingReady, setSignalingReady] = useState(false)
   const [qrOpen, setQrOpen] = useState(false)
+  /** Cartelito flotante "Grabación guardada" tras confirmar el nombre de la carpeta. */
+  const [isoSavedToast, setIsoSavedToast] = useState<{ folder: string; path: string } | null>(null)
   const [audioPanelOpen, setAudioPanelOpen] = useState(false)
   /** Estado WebRTC por “pista” (estilo mezclador): new | connecting | connected | disconnected | failed */
   const [laneRtcState, setLaneRtcState] = useState<Record<string, string>>({})
@@ -193,6 +196,9 @@ export default function App() {
   /** Separar flujo de celulares + ISO del flujo de edición de fusión (evita mezclar sesiones). */
   const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('live')
   const workspaceModeRef = useRef<WorkspaceMode>('live')
+
+  /** Alias amigables por cameraId, persistidos en localStorage. */
+  const cameraAliases = useCameraAliases()
 
   const bumpRotate = useCallback((id: string) => {
     setManualRotateDeg((prev) => ({
@@ -673,11 +679,19 @@ export default function App() {
       setStatus(
         `Grabación guardada en «${leaf}» (subcarpeta dentro de tu carpeta de grabación). Para fusión, cargá los cam-*.webm desde ahí.`
       )
+      setIsoSavedToast({ folder: leaf, path: dest })
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       setStatus(`Error al guardar: ${msg}`)
     }
   }, [pendingIsoSave, outputDir, isoFolderNameDraft])
+
+  /** Auto-cierre del cartelito de guardado tras 6 s. */
+  useEffect(() => {
+    if (!isoSavedToast) return
+    const id = window.setTimeout(() => setIsoSavedToast(null), 6000)
+    return () => window.clearTimeout(id)
+  }, [isoSavedToast])
 
   const discardPendingIso = useCallback(() => {
     if (!pendingIsoSave) return
@@ -1018,6 +1032,8 @@ export default function App() {
               <CameraTile
                 key={id}
                 cameraId={id}
+                alias={cameraAliases.aliases[id] ?? null}
+                onRename={(next) => cameraAliases.setAlias(id, next)}
                 stream={streams[id]}
                 rtcState={laneRtcState[id]}
                 rotateDeg={manualRotateDeg[id] ?? 0}
@@ -1026,7 +1042,7 @@ export default function App() {
                 onClose={() => {
                   if (expandedCameraId === id) setExpandedCameraId(null)
                   closeCamera(id)
-                  setStatus(`Cámara ${id} cerrada desde el panel.`)
+                  setStatus(`Cámara ${cameraAliases.resolve(id)} cerrada desde el panel.`)
                 }}
               />
             ))}
@@ -1060,7 +1076,7 @@ export default function App() {
               disabled={Boolean(pendingIsoSave && !recording)}
               title={
                 recording
-                  ? 'Detiene la grabación; después elegís el nombre de carpeta y guardás los WebM.'
+                  ? 'Finaliza la grabación; después elegís el nombre de carpeta y se guardan los WebM.'
                   : pendingIsoSave
                     ? 'Primero guardá o descartá la grabación pendiente (ventana de nombre).'
                     : 'Inicia grabación simultánea: un archivo por cámara (+ audio PC si aplica). Requiere carpeta y al menos una fuente.'
@@ -1079,7 +1095,7 @@ export default function App() {
               }}
             >
               {recording
-                ? 'Detener grabación'
+                ? 'Finalizar grabación'
                 : pendingIsoSave
                   ? 'Pendiente: nombre de carpeta…'
                   : 'Iniciar grabación multicámara'}
@@ -1118,6 +1134,7 @@ export default function App() {
         {expandedCameraId ? (
           <CameraExpandOverlay
             cameraId={expandedCameraId}
+            alias={cameraAliases.aliases[expandedCameraId] ?? null}
             stream={streams[expandedCameraId]}
             rtcState={laneRtcState[expandedCameraId]}
             rotateDeg={manualRotateDeg[expandedCameraId] ?? 0}
@@ -1327,6 +1344,76 @@ export default function App() {
           </div>
         </div>
       ) : null}
+
+      {isoSavedToast ? (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'fixed',
+            right: 20,
+            bottom: 20,
+            zIndex: 10001,
+            minWidth: 280,
+            maxWidth: 'calc(100vw - 40px)',
+            padding: '12px 14px',
+            borderRadius: 12,
+            background: '#052e1c',
+            border: '1px solid #166534',
+            boxShadow: '0 12px 32px rgba(0,0,0,0.55)',
+            color: '#dcfce7',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: 12
+          }}
+        >
+          <div
+            aria-hidden
+            style={{
+              width: 28,
+              height: 28,
+              flexShrink: 0,
+              borderRadius: 999,
+              background: '#16a34a',
+              color: '#022c1a',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 16,
+              fontWeight: 800
+            }}
+          >
+            ✓
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 700 }}>Grabación guardada</div>
+            <div style={{ fontSize: 12, color: '#bbf7d0', marginTop: 2, lineHeight: 1.4, wordBreak: 'break-all' }}>
+              Carpeta: <strong style={{ color: '#ecfccb' }}>{isoSavedToast.folder}</strong>
+            </div>
+            <div style={{ fontSize: 11, color: '#86efac', marginTop: 2, wordBreak: 'break-all' }}>
+              {isoSavedToast.path}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setIsoSavedToast(null)}
+            aria-label="Cerrar"
+            title="Cerrar"
+            style={{
+              border: '1px solid #166534',
+              background: 'transparent',
+              color: '#bbf7d0',
+              borderRadius: 6,
+              padding: '2px 7px',
+              cursor: 'pointer',
+              fontSize: 13,
+              lineHeight: 1
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -1452,6 +1539,8 @@ function videoPreviewStyle(rotateDeg: number): React.CSSProperties {
 
 function CameraTile({
   cameraId,
+  alias,
+  onRename,
   stream,
   rtcState,
   rotateDeg,
@@ -1460,6 +1549,8 @@ function CameraTile({
   onClose
 }: {
   cameraId: string
+  alias: string | null
+  onRename: (next: string | null) => void
   stream?: MediaStream
   rtcState?: string
   rotateDeg: number
@@ -1472,6 +1563,9 @@ function CameraTile({
   const intrinsic = useVideoIntrinsicDimensions(ref, stream)
   const portrait = intrinsic ? intrinsic.h > intrinsic.w : false
   const aspectCss = intrinsic ? `${intrinsic.w} / ${intrinsic.h}` : '16 / 9'
+  const [editing, setEditing] = useState(false)
+  const [draftAlias, setDraftAlias] = useState(alias ?? '')
+  const aliasInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     const el = ref.current
@@ -1480,8 +1574,34 @@ function CameraTile({
     if (stream?.getVideoTracks().length) void el.play().catch(() => {})
   }, [stream])
 
+  useEffect(() => {
+    if (!editing) setDraftAlias(alias ?? '')
+  }, [alias, editing])
+
+  useEffect(() => {
+    if (editing) {
+      const id = window.setTimeout(() => {
+        aliasInputRef.current?.focus()
+        aliasInputRef.current?.select()
+      }, 0)
+      return () => window.clearTimeout(id)
+    }
+    return undefined
+  }, [editing])
+
+  const commitRename = () => {
+    const next = draftAlias.trim()
+    onRename(next.length ? next : null)
+    setEditing(false)
+  }
+  const cancelRename = () => {
+    setDraftAlias(alias ?? '')
+    setEditing(false)
+  }
+
   const accent = laneAccentColor(rtcState, hasVideo)
   const label = rtcStatusLabel(rtcState, hasVideo)
+  const displayName = alias && alias.length ? alias : cameraId
 
   return (
     <div
@@ -1520,14 +1640,90 @@ function CameraTile({
             color: '#94a3b8'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0 }}>
-            <span style={{ fontFamily: 'ui-monospace, monospace', color: '#f1f5f9', fontWeight: 600 }}>
-              {cameraId}
-            </span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', minWidth: 0, flex: '1 1 auto' }}>
+            {editing ? (
+              <input
+                ref={aliasInputRef}
+                value={draftAlias}
+                onChange={(e) => setDraftAlias(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    commitRename()
+                  } else if (e.key === 'Escape') {
+                    e.preventDefault()
+                    cancelRename()
+                  }
+                }}
+                onBlur={commitRename}
+                onClick={(e) => e.stopPropagation()}
+                placeholder={cameraId}
+                maxLength={48}
+                style={{
+                  flex: '1 1 120px',
+                  minWidth: 0,
+                  padding: '2px 6px',
+                  borderRadius: 6,
+                  border: '1px solid #475569',
+                  background: '#0f172a',
+                  color: '#f1f5f9',
+                  fontSize: 11,
+                  fontWeight: 600
+                }}
+              />
+            ) : (
+              <span
+                title={alias ? `Alias · ID interno: ${cameraId}` : 'Tocá ✎ para renombrar esta cámara'}
+                style={{
+                  fontFamily: alias ? 'inherit' : 'ui-monospace, monospace',
+                  color: '#f1f5f9',
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  maxWidth: 220
+                }}
+              >
+                {displayName}
+              </span>
+            )}
+            {!editing && alias ? (
+              <span
+                style={{
+                  color: '#64748b',
+                  fontSize: 9,
+                  fontFamily: 'ui-monospace, monospace'
+                }}
+                title={`ID interno: ${cameraId}`}
+              >
+                {cameraId}
+              </span>
+            ) : null}
             <span style={{ color: '#64748b' }}>·</span>
             <span style={{ color: '#cbd5e1' }}>{label}</span>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <button
+              type="button"
+              title={alias ? 'Renombrar (Enter para guardar, Esc cancela)' : 'Asignar un nombre amigable'}
+              aria-label={`Renombrar cámara ${displayName}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                setEditing((v) => !v)
+              }}
+              style={{
+                padding: '4px 9px',
+                fontSize: 13,
+                lineHeight: 1,
+                borderRadius: 8,
+                border: '1px solid #475569',
+                background: editing ? '#0c4a6e' : '#1e293b',
+                color: '#e2e8f0',
+                cursor: 'pointer'
+              }}
+            >
+              ✎
+            </button>
             <button
               type="button"
               title="Girar imagen 90° si el celu en horizontal se ve de costado"
@@ -1551,7 +1747,7 @@ function CameraTile({
             <button
               type="button"
               title="Cerrar / desconectar esta cámara (útil si quedó colgada o duplicada)"
-              aria-label={`Cerrar cámara ${cameraId}`}
+              aria-label={`Cerrar cámara ${displayName}`}
               onClick={(e) => {
                 e.stopPropagation()
                 onClose()
@@ -1625,6 +1821,7 @@ function CameraTile({
 
 function CameraExpandOverlay({
   cameraId,
+  alias,
   stream,
   rtcState,
   rotateDeg,
@@ -1632,6 +1829,7 @@ function CameraExpandOverlay({
   onClose
 }: {
   cameraId: string
+  alias?: string | null
   stream?: MediaStream
   rtcState?: string
   rotateDeg: number
@@ -1698,14 +1896,26 @@ function CameraExpandOverlay({
             <span
               id="camera-expand-title"
               style={{
-                fontFamily: 'ui-monospace, monospace',
+                fontFamily: alias ? 'inherit' : 'ui-monospace, monospace',
                 fontSize: 18,
                 fontWeight: 700,
                 color: '#f8fafc'
               }}
+              title={alias ? `ID interno: ${cameraId}` : undefined}
             >
-              {cameraId}
+              {alias && alias.length ? alias : cameraId}
             </span>
+            {alias ? (
+              <span
+                style={{
+                  fontFamily: 'ui-monospace, monospace',
+                  fontSize: 11,
+                  color: '#64748b'
+                }}
+              >
+                {cameraId}
+              </span>
+            ) : null}
             <span
               style={{
                 fontSize: 12,

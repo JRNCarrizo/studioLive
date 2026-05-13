@@ -21,6 +21,65 @@ button:not(:disabled) {
   cursor: pointer;
 }
 
+@keyframes studio-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.studio-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(226, 232, 240, 0.25);
+  border-top-color: currentColor;
+  animation: studio-spin 0.7s linear infinite;
+  vertical-align: -2px;
+}
+
+.studio-spinner.lg {
+  width: 22px;
+  height: 22px;
+  border-width: 3px;
+}
+
+@keyframes studio-progress-stripe {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 24px 0;
+  }
+}
+
+.studio-progress-bar {
+  width: 100%;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(30, 64, 175, 0.25);
+  overflow: hidden;
+  position: relative;
+}
+
+.studio-progress-bar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    45deg,
+    rgba(96, 165, 250, 0.65) 25%,
+    transparent 25%,
+    transparent 50%,
+    rgba(96, 165, 250, 0.65) 50%,
+    rgba(96, 165, 250, 0.65) 75%,
+    transparent 75%,
+    transparent 100%
+  );
+  background-size: 24px 24px;
+  animation: studio-progress-stripe 0.85s linear infinite;
+}
+
 /* Multiview: 3 columnas; en pantallas angostas baja a 2 o 1 */
 .camera-grid {
   display: grid;
@@ -194,4 +253,11 @@ button:not(:disabled) {
   width: auto !important;
   height: auto !important;
   object-fit: contain;
+}
+
+/* Algunos Chromium ignoran controlsList="nofullscreen"; lo forzamos por CSS para no duplicar el botón. */
+.fusion-export-preview-video::-webkit-media-controls-fullscreen-button,
+.fusion-export-preview-video::-webkit-media-controls-overflow-button,
+.fusion-export-preview-video::-webkit-media-controls-picture-in-picture-button {
+  display: none !important;
 }

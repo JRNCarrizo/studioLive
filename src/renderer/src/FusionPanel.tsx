@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
+import { useCameraAliases } from './cameraAliases'
+import { FloatingEqualizerPanel } from './FloatingEqualizerPanel'
 import {
+  btnAudio,
   btnNeutral,
   pathLineMuted,
   pathTextBright,
@@ -14,6 +17,7 @@ import {
   parseRecordingFileName,
   type ParsedRecordingName
 } from './recordingFileNames'
+import { useFusionAudioGraph } from './useFusionAudioGraph'
 
 type VideoClip = {
   cameraId: string
@@ -126,6 +130,11 @@ function pickFusionRecorderMime(): string | undefined {
   return candidates.find((c) => MediaRecorder.isTypeSupported(c))
 }
 
+/** Duración por defecto del fundido entre tomas en el canvas del programa (ms). */
+const PROGRAM_CROSSFADE_MS_DEFAULT = 420
+
+type ProgramFade = { from: string; to: string; start: number }
+
 /** Muestreo del canvas hacia MediaRecorder (fps constantes desde el motor del navegador). */
 const FUSION_CAPTURE_OUT_FPS = 30
 
@@ -157,11 +166,21 @@ type FusionPanelProps = {
 }
 
 export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDir }: FusionPanelProps) {
+  const cameraAliases = useCameraAliases()
   const [clips, setClips] = useState<VideoClip[]>([])
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<number | null>(null)
   const [loadErr, setLoadErr] = useState<string | null>(null)
   const [programCameraId, setProgramCameraId] = useState<string | null>(null)
+  const [programCrossfadeMs, setProgramCrossfadeMs] = useState(PROGRAM_CROSSFADE_MS_DEFAULT)
+  /** Refs para que el rAF del dibujo lea los valores actuales sin reabrir el efecto. */
+  const crossfadeMsRef = useRef(programCrossfadeMs)
+  const programFadeRef = useRef<ProgramFade | null>(null)
+  /** Última cámara que “asentó” en el canvas (al terminar fade o al setear sin fade). */
+  const settledProgramIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    crossfadeMsRef.current = programCrossfadeMs
+  }, [programCrossfadeMs])
   const [playing, setPlaying] = useState(false)
   const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
@@ -176,8 +195,22 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
   const [openFusionSeg, setOpenFusionSeg] = useState<{ cameraId: string; startSec: number } | null>(null)
   const [fusionRecorderPaused, setFusionRecorderPaused] = useState(false)
 
+  /** Abre el panel flotante de EQ (aplica al audio que se graba en la fusión). */
+  const [eqOpen, setEqOpen] = useState(false)
+
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  const audioRef = useRef<HTMLAudioElement>(null)
+  /**
+   * Encuadre por cámara (zoom 1×–4× + offset normalizado del centro: 0..1).
+   * El destino se actualiza con mouse, el actual se interpola en el rAF (suavizado breve).
+   * `offsetX/Y = 0.5` significa centro de la imagen. Se clampa para que la ventana visible quede dentro.
+   */
+  type CamFraming = { zoom: number; offsetX: number; offsetY: number }
+  const FRAMING_NEUTRAL: CamFraming = { zoom: 1, offsetX: 0.5, offsetY: 0.5 }
+  const framingTargetRef = useRef<Map<string, CamFraming>>(new Map())
+  const framingCurrentRef = useRef<Map<string, CamFraming>>(new Map())
+  const [framingTick, setFramingTick] = useState(0)
+  const programDragRef = useRef<{ startX: number; startY: number; moved: boolean } | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
   /** Vídeos de la vista grande (programa / canvas). */
   const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map())
   /** Miniaturas inferiores (misma pista, mismo tiempo; duplicado ligero para ver todas). */
@@ -206,6 +239,23 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
   /** Nombre sugerido editable antes de «Guardar en carpeta de grabación» (incluye `.webm`). */
   const [fusionExportFileName, setFusionExportFileName] = useState('')
   const [fusionExportBusy, setFusionExportBusy] = useState(false)
+  /** Cuál botón está exportando (para spinner localizado y banner con detalle). */
+  const [fusionExportTarget, setFusionExportTarget] = useState<'webm' | 'mp4' | null>(null)
+  /** Inicio del export en ms — para mostrar “tiempo transcurrido” mientras dura la operación. */
+  const [fusionExportStartMs, setFusionExportStartMs] = useState<number | null>(null)
+  const [fusionExportElapsed, setFusionExportElapsed] = useState(0)
+
+  useEffect(() => {
+    if (fusionExportStartMs == null) {
+      setFusionExportElapsed(0)
+      return
+    }
+    setFusionExportElapsed(Date.now() - fusionExportStartMs)
+    const id = window.setInterval(() => {
+      setFusionExportElapsed(Date.now() - fusionExportStartMs)
+    }, 250)
+    return () => window.clearInterval(id)
+  }, [fusionExportStartMs])
 
   const transportPlaying = fusionPreviewUrl ? fusionPreviewPlaying : playing
 
@@ -218,6 +268,18 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
     if (el) thumbVideoRefs.current.set(id, el)
     else thumbVideoRefs.current.delete(id)
   }, [])
+
+  /**
+   * Cadena Web Audio para el audio de fusión: <audio> → EQ → (parlantes + grabador).
+   * El graph se monta una sola vez por elemento, y queda en bypass por defecto si no tocás nada.
+   * Necesito el `<audio>` como estado para que el hook reaccione a montaje/desmontaje (un ref no dispara render).
+   */
+  const [audioElState, setAudioElState] = useState<HTMLAudioElement | null>(null)
+  const setAudioElCb = useCallback((el: HTMLAudioElement | null) => {
+    audioRef.current = el
+    setAudioElState(el)
+  }, [])
+  const audioGraph = useFusionAudioGraph(audioElState, Boolean(audioUrl))
 
   useEffect(() => {
     playingRef.current = playing
@@ -493,40 +555,333 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
     }
   }, [fusionPreviewUrl, selectorMode, playing, clips, audioUrl])
 
-  /** Dibujo programa → canvas */
+  /** Programa el fundido cuando cambia la cámara del programa; si hay uno en curso, sale desde su destino. */
+  useLayoutEffect(() => {
+    if (!programCameraId) {
+      settledProgramIdRef.current = null
+      programFadeRef.current = null
+      return
+    }
+
+    if (crossfadeMsRef.current <= 0) {
+      settledProgramIdRef.current = programCameraId
+      programFadeRef.current = null
+      return
+    }
+
+    const mid = programFadeRef.current
+    const sourceFrom = mid && mid.to !== programCameraId ? mid.to : settledProgramIdRef.current
+
+    if (sourceFrom === programCameraId) {
+      if (!mid) settledProgramIdRef.current = programCameraId
+      return
+    }
+
+    if (sourceFrom == null) {
+      settledProgramIdRef.current = programCameraId
+      programFadeRef.current = null
+      return
+    }
+
+    const vFrom = videoRefs.current.get(sourceFrom)
+    const vTo = videoRefs.current.get(programCameraId)
+    if (!vFrom || !vTo) {
+      settledProgramIdRef.current = programCameraId
+      programFadeRef.current = null
+      return
+    }
+
+    programFadeRef.current = { from: sourceFrom, to: programCameraId, start: performance.now() }
+  }, [programCameraId, programCrossfadeMs])
+
+  /**
+   * Dibujo programa → canvas.
+   * Aplica encuadre virtual (zoom + pan) por cámara con interpolación suave (lerp),
+   * y cuando hay fundido entre tomas, mezcla `from`/`to` con `globalAlpha` (smoothstep).
+   */
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !programCameraId) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const draw = () => {
-      const v = videoRefs.current.get(programCameraId)
-      if (v && v.readyState >= 1) {
-        const vw = v.videoWidth
-        const vh = v.videoHeight
-        if (vw && vh) {
-          try {
-            const cw = canvas.width
-            const ch = canvas.height
-            const scale = Math.min(cw / vw, ch / vh)
-            const dw = vw * scale
-            const dh = vh * scale
-            const ox = (cw - dw) / 2
-            const oy = (ch - dh) / 2
-            ctx.fillStyle = '#020617'
-            ctx.fillRect(0, 0, cw, ch)
-            ctx.drawImage(v, ox, oy, dw, dh)
-          } catch {
-            /* fotograma aún no decodificado */
-          }
-        }
+    const lerp = (a: number, b: number, k: number) => a + (b - a) * k
+
+    const drawCamera = (cameraId: string, alpha: number) => {
+      const v = videoRefs.current.get(cameraId)
+      if (!v || v.readyState < 1) return
+      const vw = v.videoWidth
+      const vh = v.videoHeight
+      if (!vw || !vh) return
+      const target = framingTargetRef.current.get(cameraId) ?? FRAMING_NEUTRAL
+      const cur = framingCurrentRef.current.get(cameraId) ?? FRAMING_NEUTRAL
+      /** 0.22 → llega al destino en ~70–100 ms a 60 Hz; suficiente para no verse "snap". */
+      const k = 0.22
+      const next: CamFraming = {
+        zoom: lerp(cur.zoom, target.zoom, k),
+        offsetX: lerp(cur.offsetX, target.offsetX, k),
+        offsetY: lerp(cur.offsetY, target.offsetY, k)
       }
+      framingCurrentRef.current.set(cameraId, next)
+      const cw = canvas.width
+      const ch = canvas.height
+      const fit = Math.min(cw / vw, ch / vh)
+      const dw = vw * fit
+      const dh = vh * fit
+      const ox = (cw - dw) / 2
+      const oy = (ch - dh) / 2
+      const z = Math.max(1, Math.min(4, next.zoom))
+      const srcW = vw / z
+      const srcH = vh / z
+      const halfW = srcW / 2
+      const halfH = srcH / 2
+      const cx = Math.min(vw - halfW, Math.max(halfW, next.offsetX * vw))
+      const cy = Math.min(vh - halfH, Math.max(halfH, next.offsetY * vh))
+      const sx = cx - halfW
+      const sy = cy - halfH
+      try {
+        ctx.globalAlpha = alpha
+        ctx.drawImage(v, sx, sy, srcW, srcH, ox, oy, dw, dh)
+      } catch {
+        /* fotograma aún no decodificado */
+      } finally {
+        ctx.globalAlpha = 1
+      }
+    }
+
+    const draw = () => {
+      const cw = canvas.width
+      const ch = canvas.height
+      ctx.fillStyle = '#020617'
+      ctx.fillRect(0, 0, cw, ch)
+
+      const fade = programFadeRef.current
+      const ms = crossfadeMsRef.current
+
+      if (!fade || ms <= 0) {
+        drawCamera(programCameraId, 1)
+        rafRef.current = requestAnimationFrame(draw)
+        return
+      }
+
+      const elapsed = performance.now() - fade.start
+      if (elapsed >= ms) {
+        programFadeRef.current = null
+        settledProgramIdRef.current = fade.to
+        drawCamera(fade.to, 1)
+        rafRef.current = requestAnimationFrame(draw)
+        return
+      }
+
+      const tLin = Math.min(1, elapsed / ms)
+      /** Smoothstep: arranca y termina suave (más “cinematográfico” que lineal). */
+      const t = tLin * tLin * (3 - 2 * tLin)
+      drawCamera(fade.from, 1 - t)
+      drawCamera(fade.to, t)
       rafRef.current = requestAnimationFrame(draw)
     }
     rafRef.current = requestAnimationFrame(draw)
     return () => cancelAnimationFrame(rafRef.current)
   }, [programCameraId, clips])
+
+  /** Lee el encuadre destino actual de la cámara visible (para mostrar % y reset). */
+  const programFramingTarget = useMemo<CamFraming>(() => {
+    if (!programCameraId) return FRAMING_NEUTRAL
+    return framingTargetRef.current.get(programCameraId) ?? FRAMING_NEUTRAL
+    // framingTick fuerza re-render al cambiar el target sin re-renderear en cada rAF.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [programCameraId, framingTick])
+
+  const updateFramingTarget = useCallback(
+    (cameraId: string, mutator: (cur: CamFraming) => CamFraming) => {
+      const cur = framingTargetRef.current.get(cameraId) ?? FRAMING_NEUTRAL
+      const next = mutator(cur)
+      const clamped: CamFraming = {
+        zoom: Math.max(1, Math.min(4, next.zoom)),
+        offsetX: Math.max(0, Math.min(1, next.offsetX)),
+        offsetY: Math.max(0, Math.min(1, next.offsetY))
+      }
+      framingTargetRef.current.set(cameraId, clamped)
+      setFramingTick((n) => n + 1)
+    },
+    []
+  )
+
+  const resetFraming = useCallback(
+    (cameraId: string | null) => {
+      if (!cameraId) return
+      framingTargetRef.current.set(cameraId, { ...FRAMING_NEUTRAL })
+      setFramingTick((n) => n + 1)
+    },
+    []
+  )
+
+  /**
+   * Convierte (clientX, clientY) sobre el canvas en coords normalizadas (0..1) **del frame de video**,
+   * teniendo en cuenta el rect del DOM, el letterbox del canvas y el zoom/offset actual.
+   * Devuelve null si el punto cayó fuera del rect del video (en bandas negras).
+   */
+  const pointerToFrameNormalized = useCallback(
+    (clientX: number, clientY: number): { nx: number; ny: number } | null => {
+      const canvas = canvasRef.current
+      if (!canvas || !programCameraId) return null
+      const v = videoRefs.current.get(programCameraId)
+      if (!v) return null
+      const vw = v.videoWidth
+      const vh = v.videoHeight
+      if (!vw || !vh) return null
+      const rect = canvas.getBoundingClientRect()
+      const cssX = clientX - rect.left
+      const cssY = clientY - rect.top
+      const cw = canvas.width
+      const ch = canvas.height
+      /** Mapear CSS → coords internas del canvas (1280×720). */
+      const px = (cssX / rect.width) * cw
+      const py = (cssY / rect.height) * ch
+      const fit = Math.min(cw / vw, ch / vh)
+      const dw = vw * fit
+      const dh = vh * fit
+      const ox = (cw - dw) / 2
+      const oy = (ch - dh) / 2
+      if (px < ox || px > ox + dw || py < oy || py > oy + dh) return null
+      const cur = framingTargetRef.current.get(programCameraId) ?? FRAMING_NEUTRAL
+      const z = Math.max(1, Math.min(4, cur.zoom))
+      /** Posición dentro del rect dibujado (0..1). */
+      const u = (px - ox) / dw
+      const w = (py - oy) / dh
+      /** Tamaño visible del frame (en coords 0..1 del frame). */
+      const srcW01 = 1 / z
+      const srcH01 = 1 / z
+      const halfW01 = srcW01 / 2
+      const halfH01 = srcH01 / 2
+      const cxN = Math.min(1 - halfW01, Math.max(halfW01, cur.offsetX))
+      const cyN = Math.min(1 - halfH01, Math.max(halfH01, cur.offsetY))
+      const sx01 = cxN - halfW01
+      const sy01 = cyN - halfH01
+      return { nx: sx01 + u * srcW01, ny: sy01 + w * srcH01 }
+    },
+    [programCameraId]
+  )
+
+  const onProgramWheel = useCallback(
+    (e: React.WheelEvent<HTMLCanvasElement>) => {
+      if (!programCameraId) return
+      e.preventDefault()
+      const ptr = pointerToFrameNormalized(e.clientX, e.clientY)
+      const cur = framingTargetRef.current.get(programCameraId) ?? FRAMING_NEUTRAL
+      /** Factor multiplicativo: scroll arriba acerca; mantiene sensación natural en trackpad/rueda. */
+      const factor = Math.exp(-e.deltaY * 0.0015)
+      const newZoom = Math.max(1, Math.min(4, cur.zoom * factor))
+      if (newZoom === cur.zoom) return
+      if (!ptr) {
+        updateFramingTarget(programCameraId, (c) => ({ ...c, zoom: newZoom }))
+        return
+      }
+      /**
+       * Zoom anclado al cursor: queremos que el píxel bajo el cursor (en coords del frame)
+       * se quede bajo el cursor. Si conocemos (nx, ny) del puntero antes del zoom y
+       * el cursor está a (u,w) en el rect dibujado, despejamos el nuevo offsetX/Y:
+       *   nx = (offsetX - 0.5/z') + u * (1/z')  →  offsetX = nx - u/z' + 0.5/z'
+       * usando u≈w del nuevo rect (mismas u,w que pre-zoom, porque el rect destino no cambia).
+       */
+      const canvas = canvasRef.current!
+      const v = videoRefs.current.get(programCameraId)!
+      const vw = v.videoWidth
+      const vh = v.videoHeight
+      const cw = canvas.width
+      const ch = canvas.height
+      const rect = canvas.getBoundingClientRect()
+      const cssX = e.clientX - rect.left
+      const cssY = e.clientY - rect.top
+      const px = (cssX / rect.width) * cw
+      const py = (cssY / rect.height) * ch
+      const fit = Math.min(cw / vw, ch / vh)
+      const dw = vw * fit
+      const dh = vh * fit
+      const ox = (cw - dw) / 2
+      const oy = (ch - dh) / 2
+      const u = Math.min(1, Math.max(0, (px - ox) / dw))
+      const w = Math.min(1, Math.max(0, (py - oy) / dh))
+      const newOffsetX = ptr.nx - u / newZoom + 0.5 / newZoom
+      const newOffsetY = ptr.ny - w / newZoom + 0.5 / newZoom
+      updateFramingTarget(programCameraId, () => ({
+        zoom: newZoom,
+        offsetX: newOffsetX,
+        offsetY: newOffsetY
+      }))
+    },
+    [pointerToFrameNormalized, programCameraId, updateFramingTarget]
+  )
+
+  const onProgramMouseDown = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (!programCameraId) return
+      if (e.button !== 0) return
+      programDragRef.current = { startX: e.clientX, startY: e.clientY, moved: false }
+    },
+    [programCameraId]
+  )
+
+  const onProgramMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      const drag = programDragRef.current
+      if (!drag || !programCameraId) return
+      const dx = e.clientX - drag.startX
+      const dy = e.clientY - drag.startY
+      if (!drag.moved && Math.hypot(dx, dy) < 3) return
+      drag.moved = true
+      drag.startX = e.clientX
+      drag.startY = e.clientY
+      const canvas = canvasRef.current
+      if (!canvas) return
+      const v = videoRefs.current.get(programCameraId)
+      if (!v) return
+      const vw = v.videoWidth
+      const vh = v.videoHeight
+      if (!vw || !vh) return
+      const rect = canvas.getBoundingClientRect()
+      const cw = canvas.width
+      const ch = canvas.height
+      const fit = Math.min(cw / vw, ch / vh)
+      const dw = vw * fit
+      const dh = vh * fit
+      /** dx en CSS → en frame normalizado: dividir por dw_css y luego por zoom. */
+      const cssDxRatio = dx / (rect.width * (dw / cw))
+      const cssDyRatio = dy / (rect.height * (dh / ch))
+      const cur = framingTargetRef.current.get(programCameraId) ?? FRAMING_NEUTRAL
+      const z = Math.max(1, Math.min(4, cur.zoom))
+      updateFramingTarget(programCameraId, (c) => ({
+        ...c,
+        offsetX: c.offsetX - cssDxRatio / z,
+        offsetY: c.offsetY - cssDyRatio / z
+      }))
+    },
+    [programCameraId, updateFramingTarget]
+  )
+
+  const onProgramMouseUp = useCallback(() => {
+    programDragRef.current = null
+  }, [])
+
+  const onProgramClick = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      /** Si el mouse arrastró (>3px), no es "clic puntual" → no centrar. */
+      const drag = programDragRef.current
+      if (drag?.moved) {
+        programDragRef.current = null
+        return
+      }
+      if (!programCameraId) return
+      const ptr = pointerToFrameNormalized(e.clientX, e.clientY)
+      if (!ptr) return
+      updateFramingTarget(programCameraId, (c) => ({ ...c, offsetX: ptr.nx, offsetY: ptr.ny }))
+    },
+    [pointerToFrameNormalized, programCameraId, updateFramingTarget]
+  )
+
+  const onProgramDoubleClick = useCallback(() => {
+    resetFraming(programCameraId)
+  }, [programCameraId, resetFraming])
 
   const pauseAll = useCallback(() => {
     const master = audioUrl && audioRef.current ? audioRef.current : videoRefs.current.get(clips[0]!.cameraId)
@@ -732,6 +1087,9 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
     const name = sanitizeFusionSaveFileName(fusionExportFileName, fallback)
     const filePath = joinOutputPath(dir, name)
     setFusionExportBusy(true)
+    setFusionExportTarget('webm')
+    setFusionExportStartMs(Date.now())
+    onStatus(`Guardando WebM: ${name} …`)
     try {
       const buf = await blob.arrayBuffer()
       await window.studio.saveVideo(filePath, buf)
@@ -744,6 +1102,8 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
       onStatus(`Error al guardar WebM: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setFusionExportBusy(false)
+      setFusionExportTarget(null)
+      setFusionExportStartMs(null)
     }
   }, [fusionExportFileName, fusionPreviewUrl, outputDir, sessionId, onStatus])
 
@@ -759,7 +1119,9 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
     const name = sanitizeFusionMp4FileName(fusionExportFileName, fallbackMp4)
     const filePath = joinOutputPath(dir, name)
     setFusionExportBusy(true)
-    onStatus('Generando MP4 con FFmpeg (puede tardar según la duración)...')
+    setFusionExportTarget('mp4')
+    setFusionExportStartMs(Date.now())
+    onStatus('Generando MP4 con FFmpeg (puede tardar según la duración)…')
     try {
       const buf = await blob.arrayBuffer()
       const r = await window.studio.saveFusionMp4(filePath, buf)
@@ -776,8 +1138,70 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
       onStatus(`Error al exportar MP4: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setFusionExportBusy(false)
+      setFusionExportTarget(null)
+      setFusionExportStartMs(null)
     }
   }, [fusionExportFileName, fusionPreviewUrl, outputDir, sessionId, onStatus])
+
+  /**
+   * Cierra por completo la sesión de Fusión (archivos): descarta pistas, plan, vista previa
+   * y vuelve al estado vacío. No borra nada del disco. Pide confirmación.
+   * Si hay una grabación o exportación en curso, avisa y no procede.
+   */
+  const closeFusionSession = useCallback(() => {
+    if (fusionRecording) {
+      onStatus('Finalizá la grabación antes de cerrar la sesión.')
+      return
+    }
+    if (fusionExportBusy) {
+      onStatus('Esperá a que termine la exportación antes de cerrar.')
+      return
+    }
+    const empty = !clips.length && !audioUrl && !fusionPreviewUrl && !sessionId
+    if (empty) return
+    const ok = window.confirm(
+      '¿Cerrar la sesión cargada en Fusión?\n\nSe descartan las pistas, el plan de cámara y la vista previa.\nLos archivos ya guardados en disco NO se borran.'
+    )
+    if (!ok) return
+
+    pauseAll()
+    if (fusionPreviewUrl) {
+      try {
+        URL.revokeObjectURL(fusionPreviewUrl)
+      } catch {
+        /* vacío */
+      }
+    }
+    setFusionPreviewUrl(null)
+    fusionPreviewBlobRef.current = null
+    fusionPreviewMimeRef.current = undefined
+    setFusionExportFileName('')
+    setFusionSegmentsDone([])
+    setOpenFusionSeg(null)
+    setFusionRecorderPaused(false)
+    setProgramCameraId(null)
+    setSessionId(null)
+    setAudioUrl(null)
+    setClips([])
+    setPlaying(false)
+    setCurrentTime(0)
+    setDuration(0)
+    setLoadErr(null)
+    framingTargetRef.current.clear()
+    framingCurrentRef.current.clear()
+    videoRefs.current.clear()
+    thumbVideoRefs.current.clear()
+    onStatus('Sesión de fusión cerrada.')
+  }, [
+    audioUrl,
+    clips.length,
+    fusionExportBusy,
+    fusionPreviewUrl,
+    fusionRecording,
+    onStatus,
+    pauseAll,
+    sessionId
+  ])
 
   const discardFusionPreview = useCallback(() => {
     fusionPreviewBlobRef.current = null
@@ -802,55 +1226,19 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
     })
   }, [fusionPreviewUrl, onStatus, clips, audioUrl, selectorMode])
 
+  /**
+   * Pantalla completa para la vista previa: usamos siempre el modo CSS (fixed + inset 0 + z-index alto).
+   * Es 100% confiable en Electron (la Fullscreen API a veces falla en silencio dentro de algunos contextos)
+   * y se cierra con el mismo botón o con Esc.
+   */
   const toggleFusionPreviewFullscreen = useCallback(() => {
-    const wrap = fusionPreviewWrapRef.current
-    const vid = fusionPreviewVideoRef.current
-    if (!wrap) return
-
+    /** Si por algún motivo entramos al fullscreen real del SO, salimos primero. */
     const fsEl = document.fullscreenElement
-    if (fsEl && (fsEl === wrap || fsEl === vid || wrap.contains(fsEl))) {
+    if (fsEl) {
       void document.exitFullscreen?.().catch(() => {})
-      return
     }
-
-    if (fusionPreviewPseudoFullscreen) {
-      setFusionPreviewPseudoFullscreen(false)
-      return
-    }
-
-    const fail = () => setFusionPreviewPseudoFullscreen(true)
-
-    const enter = (el: Element | null): Promise<void> => {
-      if (!el) return Promise.reject(new Error('sin elemento'))
-      if (typeof el.requestFullscreen === 'function') {
-        return el.requestFullscreen({ navigationUI: 'hide' }).then(() => undefined)
-      }
-      try {
-        const wk = (el as unknown as { webkitRequestFullscreen?: () => void }).webkitRequestFullscreen
-        if (wk) {
-          wk.call(el)
-          return Promise.resolve()
-        }
-      } catch {
-        return Promise.reject(new Error('webkit'))
-      }
-      try {
-        const ms = (el as unknown as { msRequestFullscreen?: () => void }).msRequestFullscreen
-        if (ms) {
-          ms.call(el)
-          return Promise.resolve()
-        }
-      } catch {
-        return Promise.reject(new Error('ms'))
-      }
-      return Promise.reject(new Error('sin API'))
-    }
-
-    /** Primero el `<video>` (Chromium/Electron); si falla, el contenedor. Siempre hay modo CSS de respaldo. */
-    void enter(vid)
-      .catch(() => enter(wrap))
-      .catch(fail)
-  }, [fusionPreviewPseudoFullscreen])
+    setFusionPreviewPseudoFullscreen((v) => !v)
+  }, [])
 
   const startFusionRecord = useCallback(async () => {
     if (!outputDir) {
@@ -874,9 +1262,13 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
 
     let outStream: MediaStream
     const aEl = audioRef.current
-    if (aEl && audioUrl) {
+    /** Prefiero la pista procesada por el EQ (siempre activa, en bypass cuando todas las bandas están a 0). */
+    const eqTrack = audioGraph.processedTrack
+    if (aEl && audioUrl && eqTrack) {
+      outStream = new MediaStream([vidTrack, eqTrack])
+    } else if (aEl && audioUrl) {
       try {
-        /** `captureStream` en audio existe en Chromium; los typings de `HTMLAudioElement` a veces no lo declaran. */
+        /** Fallback si el grafo Web Audio no se montó (raro). */
         const cap = (aEl as HTMLMediaElement & { captureStream?: () => MediaStream }).captureStream?.()
         if (!cap) {
           outStream = new MediaStream([vidTrack])
@@ -921,7 +1313,17 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
         onStatus(`Grabación iniciada pero falló play: ${e instanceof Error ? e.message : String(e)}`)
       }
     }
-  }, [clips, getMasterTime, onStatus, outputDir, playAll, playing, programCameraId])
+  }, [
+    audioGraph.processedTrack,
+    audioUrl,
+    clips,
+    getMasterTime,
+    onStatus,
+    outputDir,
+    playAll,
+    playing,
+    programCameraId
+  ])
 
   const fusionRecorderSupportsPause =
     typeof MediaRecorder !== 'undefined' && typeof MediaRecorder.prototype.pause === 'function'
@@ -1056,6 +1458,26 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
         >
           Cargar pistas WebM…
         </button>
+        <button
+          type="button"
+          onClick={() => setEqOpen((v) => !v)}
+          disabled={!audioUrl}
+          title={
+            audioUrl
+              ? 'Abre el ecualizador flotante (se aplica al audio antes de grabar la fusión).'
+              : 'Cargá una sesión con audio (audio-*.webm) para usar el EQ.'
+          }
+          style={{
+            ...btnAudio,
+            opacity: audioUrl ? 1 : 0.5,
+            cursor: audioUrl ? 'pointer' : 'not-allowed'
+          }}
+        >
+          <span aria-hidden style={{ fontSize: 13 }}>≋</span>
+          {audioGraph.gains.some((g) => Math.abs(g) > 0.05) && !audioGraph.bypass
+            ? ' EQ · activo'
+            : ' EQ'}
+        </button>
         {sessionId !== null ? (
           <span style={{ fontSize: 12, color: '#86efac' }}>Sesión {sessionId}</span>
         ) : null}
@@ -1070,7 +1492,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
         >
           <audio
             key={audioUrl}
-            ref={audioRef}
+            ref={setAudioElCb}
             src={audioUrl}
             preload="auto"
             onLoadedMetadata={refreshDuration}
@@ -1152,14 +1574,157 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
               </div>
             </div>
 
+            <div
+              style={{
+                display: 'flex',
+                gap: 12,
+                alignItems: 'center',
+                justifyContent: 'center',
+                marginBottom: 4,
+                flexWrap: 'wrap'
+              }}
+            >
+              <label
+                style={{
+                  fontSize: 11,
+                  color: '#94a3b8',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  cursor: 'pointer'
+                }}
+                title="Tiempo de fundido al cambiar de cámara. 0 = corte seco."
+              >
+                Fundido entre tomas
+                <input
+                  type="range"
+                  min={0}
+                  max={1500}
+                  step={30}
+                  value={programCrossfadeMs}
+                  onChange={(e) => setProgramCrossfadeMs(Number(e.target.value))}
+                  aria-valuetext={
+                    programCrossfadeMs === 0 ? 'corte seco' : `${programCrossfadeMs} milisegundos`
+                  }
+                  style={{ width: 140, verticalAlign: 'middle', accentColor: '#7dd3fc' }}
+                />
+                <span
+                  style={{
+                    minWidth: 72,
+                    color: '#cbd5e1',
+                    fontVariantNumeric: 'tabular-nums'
+                  }}
+                >
+                  {programCrossfadeMs === 0 ? 'corte' : `${programCrossfadeMs} ms`}
+                </span>
+              </label>
+              {programCrossfadeMs > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => setProgramCrossfadeMs(0)}
+                  title="Volver al corte seco"
+                  style={{
+                    padding: '4px 10px',
+                    borderRadius: 6,
+                    border: '1px solid #334155',
+                    background: '#0f172a',
+                    color: '#cbd5e1',
+                    fontSize: 11
+                  }}
+                >
+                  Corte seco
+                </button>
+              ) : null}
+            </div>
+
             <div className="fusion-preview-box">
               {/*
               Canvas centrado con proporción fija (evita estirar horizontal el bitmap).
               Los <video> siguen en .fusion-video-decoders solo para decodificar / drawImage.
+              Mouse: rueda = zoom (anclado al cursor), arrastrar = pan, clic = centrar, doble clic = reset.
             */}
               <div className="fusion-preview-inner">
-                <canvas ref={canvasRef} width={1280} height={720} />
+                <canvas
+                  ref={canvasRef}
+                  width={1280}
+                  height={720}
+                  onWheel={onProgramWheel}
+                  onMouseDown={onProgramMouseDown}
+                  onMouseMove={onProgramMouseMove}
+                  onMouseUp={onProgramMouseUp}
+                  onMouseLeave={onProgramMouseUp}
+                  onClick={onProgramClick}
+                  onDoubleClick={onProgramDoubleClick}
+                  style={{
+                    cursor: programCameraId
+                      ? programFramingTarget.zoom > 1.001
+                        ? 'grab'
+                        : 'zoom-in'
+                      : 'default',
+                    touchAction: 'none'
+                  }}
+                />
               </div>
+              {programCameraId ? (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 8,
+                    right: 8,
+                    zIndex: 2,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '4px 8px',
+                    borderRadius: 8,
+                    background: 'rgba(2, 6, 23, 0.72)',
+                    border: '1px solid #1e293b',
+                    color: '#e2e8f0',
+                    fontSize: 11,
+                    pointerEvents: 'auto'
+                  }}
+                  onMouseDown={(ev) => ev.stopPropagation()}
+                  onDoubleClick={(ev) => ev.stopPropagation()}
+                >
+                  <span
+                    title="Rueda = zoom · arrastrar = pan · clic = centrar · doble clic = reset"
+                    style={{ color: '#94a3b8' }}
+                  >
+                    Encuadre
+                  </span>
+                  <span
+                    style={{
+                      fontVariantNumeric: 'tabular-nums',
+                      color: programFramingTarget.zoom > 1.001 ? '#7dd3fc' : '#64748b',
+                      minWidth: 36,
+                      textAlign: 'right'
+                    }}
+                  >
+                    {programFramingTarget.zoom.toFixed(2)}×
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => resetFraming(programCameraId)}
+                    disabled={
+                      programFramingTarget.zoom <= 1.001 &&
+                      Math.abs(programFramingTarget.offsetX - 0.5) < 1e-3 &&
+                      Math.abs(programFramingTarget.offsetY - 0.5) < 1e-3
+                    }
+                    title="Reset encuadre (doble clic también)"
+                    style={{
+                      padding: '2px 8px',
+                      borderRadius: 6,
+                      border: '1px solid #334155',
+                      background: '#0f172a',
+                      color: '#cbd5e1',
+                      cursor: 'pointer',
+                      fontSize: 11
+                    }}
+                  >
+                    Reset
+                  </button>
+                </div>
+              ) : null}
             </div>
             <div className="fusion-video-decoders" aria-hidden>
               {clips.map((c) => (
@@ -1207,7 +1772,9 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                     return (
                       <div
                         key={`${seg.cameraId}-${i}-${seg.startSec}`}
-                        title={`${seg.cameraId} · ${fmt(seg.startSec)} → ${fmt(seg.endSec)}`}
+                        title={`${cameraAliases.resolve(seg.cameraId)} · ${fmt(seg.startSec)} → ${fmt(seg.endSec)}${
+                          cameraAliases.resolve(seg.cameraId) !== seg.cameraId ? ` (${seg.cameraId})` : ''
+                        }`}
                         style={{
                           position: 'absolute',
                           left: `${leftPct}%`,
@@ -1289,7 +1856,9 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                           flexShrink: 0
                         }}
                       />
-                      <span style={{ color: '#94a3b8' }}>{id}</span>
+                      <span style={{ color: '#94a3b8' }} title={cameraAliases.resolve(id) !== id ? id : undefined}>
+                        {cameraAliases.resolve(id)}
+                      </span>
                     </span>
                   ))}
                 </div>
@@ -1402,10 +1971,19 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                           background: !outputDir || fusionExportBusy ? '#334155' : '#065f46',
                           color: '#ecfdf5',
                           fontWeight: 600,
-                          opacity: fusionExportBusy ? 0.85 : 1
+                          opacity: fusionExportBusy ? 0.85 : 1,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 8
                         }}
                       >
-                        Guardar WebM
+                        {fusionExportTarget === 'webm' ? (
+                          <>
+                            <span className="studio-spinner" aria-hidden /> Guardando WebM…
+                          </>
+                        ) : (
+                          'Guardar WebM'
+                        )}
                       </button>
                       <button
                         type="button"
@@ -1418,10 +1996,19 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                           background: !outputDir || fusionExportBusy ? '#334155' : '#1e40af',
                           color: '#eff6ff',
                           fontWeight: 600,
-                          opacity: fusionExportBusy ? 0.85 : 1
+                          opacity: fusionExportBusy ? 0.85 : 1,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 8
                         }}
                       >
-                        Guardar MP4 (recomendado Windows)
+                        {fusionExportTarget === 'mp4' ? (
+                          <>
+                            <span className="studio-spinner" aria-hidden /> Generando MP4…
+                          </>
+                        ) : (
+                          'Guardar MP4 (recomendado Windows)'
+                        )}
                       </button>
                       <button
                         type="button"
@@ -1439,6 +2026,46 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                         Descartar vista previa
                       </button>
                     </div>
+                    {fusionExportTarget ? (
+                      <div
+                        role="status"
+                        aria-live="polite"
+                        style={{
+                          marginTop: 10,
+                          padding: '10px 12px',
+                          borderRadius: 10,
+                          border: fusionExportTarget === 'mp4' ? '1px solid #1d4ed8' : '1px solid #047857',
+                          background: fusionExportTarget === 'mp4' ? '#0b1a3a' : '#062018',
+                          color: fusionExportTarget === 'mp4' ? '#dbeafe' : '#bbf7d0',
+                          fontSize: 12,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 8
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <span className="studio-spinner lg" aria-hidden />
+                          <div style={{ flex: 1, minWidth: 0, lineHeight: 1.45 }}>
+                            <strong>
+                              {fusionExportTarget === 'mp4' ? 'Generando MP4…' : 'Guardando WebM…'}
+                            </strong>{' '}
+                            {fusionExportTarget === 'mp4'
+                              ? 'FFmpeg está re-codificando a H.264. Puede tardar bastante según la duración (no cierres la app).'
+                              : 'Escribiendo el archivo en la carpeta de grabación.'}
+                          </div>
+                          <span
+                            style={{
+                              fontVariantNumeric: 'tabular-nums',
+                              fontWeight: 700,
+                              fontSize: 13
+                            }}
+                          >
+                            {Math.floor(fusionExportElapsed / 1000)}s
+                          </span>
+                        </div>
+                        <div className="studio-progress-bar" aria-hidden />
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>
@@ -1453,6 +2080,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                     <button
                       key={c.cameraId}
                       type="button"
+                      title={cameraAliases.resolve(c.cameraId) !== c.cameraId ? `ID: ${c.cameraId}` : undefined}
                       onClick={() => pickProgramCamera(c.cameraId)}
                       style={{
                         padding: '8px 12px',
@@ -1465,7 +2093,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                         fontWeight: programCameraId === c.cameraId ? 700 : 500
                       }}
                     >
-                      {c.cameraId}
+                      {cameraAliases.resolve(c.cameraId)}
                     </button>
                   ))}
                 </div>
@@ -1582,13 +2210,40 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                   opacity: fusionRecording ? 1 : 0.5
                 }}
               >
-                Detener grabación
+                Finalizar grabación
               </button>
               {fusionRecording ? (
                 <span style={{ fontSize: 12, fontWeight: 700, color: fusionRecorderPaused ? '#fdba74' : '#e9d5ff' }}>
                   {fusionRecorderPaused ? '■ PAUSA' : '● GRABANDO'}
                 </span>
               ) : null}
+              <button
+                type="button"
+                disabled={
+                  fusionRecording ||
+                  fusionExportBusy ||
+                  (!clips.length && !audioUrl && !fusionPreviewUrl && !sessionId)
+                }
+                onClick={() => closeFusionSession()}
+                title="Descarta las pistas cargadas, el plan y la vista previa (no borra archivos del disco)"
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  border: '1px solid #475569',
+                  background: '#1f2937',
+                  color: '#e2e8f0',
+                  fontWeight: 600,
+                  marginLeft: 'auto',
+                  opacity:
+                    fusionRecording ||
+                    fusionExportBusy ||
+                    (!clips.length && !audioUrl && !fusionPreviewUrl && !sessionId)
+                      ? 0.45
+                      : 1
+                }}
+              >
+                Cancelar
+              </button>
             </div>
           </div>
 
@@ -1603,7 +2258,9 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                     key={`thumb-${c.cameraId}`}
                     type="button"
                     onClick={() => pickProgramCamera(c.cameraId)}
-                    title={`Enviar ${c.cameraId} al programa`}
+                    title={`Enviar ${cameraAliases.resolve(c.cameraId)} al programa${
+                      cameraAliases.resolve(c.cameraId) !== c.cameraId ? ` · ID: ${c.cameraId}` : ''
+                    }`}
                     style={{
                       padding: 6,
                       borderRadius: 10,
@@ -1664,7 +2321,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                         wordBreak: 'break-word'
                       }}
                     >
-                      {c.cameraId}
+                      {cameraAliases.resolve(c.cameraId)}
                     </div>
                   </button>
                 ))}
@@ -1673,6 +2330,13 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
           ) : null}
         </div>
       ) : null}
+
+      <FloatingEqualizerPanel
+        open={eqOpen && Boolean(audioUrl)}
+        onClose={() => setEqOpen(false)}
+        graph={audioGraph}
+        fusionRecording={fusionRecording}
+      />
     </div>
   )
 }
