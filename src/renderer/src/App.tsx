@@ -1,7 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { FloatingPcAudioPanel, readStoredPcAudioGainPercent } from './FloatingPcAudioPanel'
 import { FusionPanel } from './FusionPanel'
 import { LiveFusionPanel } from './LiveFusionPanel'
+import { QrConnectOverlay } from './QrConnectOverlay'
+import { usePcAudioMix } from './usePcAudioMix'
+import {
+  btnAudio,
+  btnNeutral,
+  btnQr,
+  pathLineMuted,
+  pathTextBright,
+  warnLineNoFolder,
+  workspaceActionRowLabel,
+  workspaceEyebrow,
+  workspaceToolbar
+} from './workspaceChrome'
 
 type StudioCameraWorkspace = 'live' | 'liveFusion'
 
@@ -162,11 +176,12 @@ export default function App() {
   const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([])
   const [selectedAudioDeviceId, setSelectedAudioDeviceId] = useState<string>('')
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null)
+  const [pcAudioGainPercent, setPcAudioGainPercent] = useState(() => readStoredPcAudioGainPercent())
   const [audioNote, setAudioNote] = useState<string | null>(null)
   const [videoPreset, setVideoPreset] = useState<VideoPresetId>('medium')
   const [signalingReady, setSignalingReady] = useState(false)
-  /** URLs, calidad, audio de PC, certificado HTTPS, etc. */
-  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [qrOpen, setQrOpen] = useState(false)
+  const [audioPanelOpen, setAudioPanelOpen] = useState(false)
   /** Estado WebRTC por “pista” (estilo mezclador): new | connecting | connected | disconnected | failed */
   const [laneRtcState, setLaneRtcState] = useState<Record<string, string>>({})
   /** Cámara ampliada al hacer clic en la miniatura */
@@ -196,20 +211,16 @@ export default function App() {
   const sessionRef = useRef<number>(0)
   /** Inicio de la grabación ISO actual (para cronómetro). */
   const isoRecordingStartedAtRef = useRef<number | null>(null)
+  const openQrPopover = useCallback(() => {
+    setQrOpen(true)
+  }, [])
+  const openAudioPanel = useCallback(() => {
+    setAudioPanelOpen(true)
+  }, [])
 
   useEffect(() => {
     workspaceModeRef.current = workspaceMode
   }, [workspaceMode])
-
-  const urls = useMemo(() => {
-    if (!info) return []
-    if (workspaceMode === 'fusion') return []
-    const wsParam = workspaceMode === 'liveFusion' ? 'liveFusion' : 'live'
-    return info.ips.map(
-      (ip) =>
-        `https://${ip}:${info.port}/?preset=${encodeURIComponent(videoPreset)}&studioWorkspace=${wsParam}`
-    )
-  }, [info, videoPreset, workspaceMode])
 
   const pingUrls = useMemo(() => {
     if (!info) return []
@@ -229,6 +240,9 @@ export default function App() {
     for (const id of Object.keys(streams)) ids.add(id)
     return [...ids].sort()
   }, [cameras, streams])
+
+  const pcMix = usePcAudioMix(audioStream, pcAudioGainPercent / 100)
+  const pcRecordingStream = pcMix.processedStream ?? audioStream
 
   /** Resumen de lo que entrará en la grabación ISO simultánea (no es solo “estar en vivo”). */
   const isoSourcesSummary = useMemo(() => {
@@ -276,7 +290,7 @@ export default function App() {
         if (!Number.isFinite(port)) throw new Error('Puerto inválido')
         hostPanelHttpPortRef.current = hostPanelHttpPort
         setInfo({ port, loopbackSignalingPort: loop, hostPanelHttpPort, ips })
-        setStatus('Listo. Abrí la URL en cada celular y tocá "Transmitir".')
+        setStatus('Listo. Escaneá el QR con cada celular (en Configuración) y tocá "Transmitir".')
       } catch (e) {
         console.error('studio:get-info', e)
         setStatus(
@@ -326,7 +340,7 @@ export default function App() {
     }
     setExpandedCameraId(null)
     setStatus(
-      'Pestaña cambiada: se cerraron las conexiones WebRTC de la sesión anterior. En cada celular abrí la URL que muestra esta pestaña y tocá Transmitir.'
+      'Pestaña cambiada: se cerraron las conexiones WebRTC de la sesión anterior. Escaneá de nuevo el QR de esta pestaña en cada celular y tocá Transmitir.'
     )
   }, [workspaceMode, closeCamera])
 
@@ -435,7 +449,7 @@ export default function App() {
           setStatus(
             `Un celular se registró con otra URL de modo (${camWs === 'liveFusion' ? 'Fusión en vivo' : 'Sesión en vivo'}). Esta pestaña usa ${
               workspaceModeRef.current === 'liveFusion' ? 'Fusión en vivo' : workspaceModeRef.current === 'live' ? 'Sesión en vivo' : 'archivos'
-            } — abrí la URL correcta o cambiá de pestaña.`
+            } — escaneá el QR de esta pestaña o cambiá a la pestaña correcta.`
           )
           return
         }
@@ -711,16 +725,16 @@ export default function App() {
         rec.start(500)
       }
 
-      if (audioStream?.getAudioTracks().length) {
+      if (pcRecordingStream?.getAudioTracks().length) {
         anyTrack = true
         const chunks: BlobPart[] = []
         chunksRef.current.set(PC_AUDIO_RECORDER_KEY, chunks)
         const rec = audioMime
-          ? new MediaRecorder(audioStream, {
+          ? new MediaRecorder(pcRecordingStream, {
               mimeType: audioMime,
               audioBitsPerSecond: ISO_AUDIO_BITS_PER_SECOND
             })
-          : new MediaRecorder(audioStream, { audioBitsPerSecond: ISO_AUDIO_BITS_PER_SECOND })
+          : new MediaRecorder(pcRecordingStream, { audioBitsPerSecond: ISO_AUDIO_BITS_PER_SECOND })
         rec.ondataavailable = (e) => {
           if (e.data.size) chunks.push(e.data)
         }
@@ -745,7 +759,7 @@ export default function App() {
 
     if (!anyTrack) {
       setStatus(
-        'No hay fuentes para grabar: abrí la URL en el celular y tocá Transmitir, o activá «Audio de PC» en configuración.'
+        'No hay fuentes para grabar: escaneá el QR con el celular y tocá Transmitir, o activá «Audio de PC» en configuración.'
       )
       return
     }
@@ -753,9 +767,9 @@ export default function App() {
     isoRecordingStartedAtRef.current = Date.now()
     setRecording(true)
     setStatus(
-      'Grabación ISO en curso: se guarda un WebM por cada cámara en vivo + audio de PC si está activo. Detené para escribir los archivos.'
+      'Grabación en curso: un archivo por cada cámara en vivo + audio de PC si está activo. Detené para escribir los archivos.'
     )
-  }, [audioStream, outputDir, pendingIsoSave, streams, videoPreset])
+  }, [pcRecordingStream, outputDir, pendingIsoSave, streams, videoPreset])
 
   const toggleRecord = async () => {
     try {
@@ -785,9 +799,18 @@ export default function App() {
       return s?.getVideoTracks().some((t) => t.readyState === 'live')
     })
     const hasPcAudio = Boolean(audioStream?.getAudioTracks().some((t) => t.readyState === 'live'))
+    if (!hasCameras && workspaceMode !== 'fusion') {
+      openQrPopover()
+      setStatus(
+        hasPcAudio
+          ? 'No hay cámaras conectadas. Escaneá el QR con cada celular y tocá Transmitir, o seguí sólo con audio de PC reapretando «Iniciar grabación multicámara».'
+          : 'No hay cámaras conectadas. Escaneá el QR con cada celular y tocá Transmitir, o activá «Audio de PC» (botón verde) si vas a grabar sólo audio.'
+      )
+      return
+    }
     if (!hasCameras && !hasPcAudio) {
       setStatus(
-        'Transmitir en vivo no guarda archivos. Para la grabación ISO: primero que el celular esté “En vivo”, después tocá «Iniciar grabación ISO» abajo (y carpeta elegida).'
+        'No hay fuentes para grabar. Activá «Audio de PC» o conectá un celular antes de iniciar la grabación.'
       )
       return
     }
@@ -838,50 +861,13 @@ export default function App() {
           <button
             type="button"
             role="tab"
-            aria-selected={workspaceMode === 'liveFusion'}
-            onClick={() => {
-              if (isoBusy) {
-                setStatus(
-                  pendingIsoSave
-                    ? 'Guardá o descartá la grabación ISO pendiente antes de pasar a Fusión en vivo.'
-                    : 'Detené la grabación ISO antes de pasar a Fusión en vivo.'
-                )
-                return
-              }
-              setWorkspaceMode('liveFusion')
-            }}
-            disabled={isoBusy}
-            title={
-              isoBusy
-                ? pendingIsoSave
-                  ? 'Guardá o descartá la grabación antes de usar Fusión en vivo'
-                  : 'No podés cambiar de pestaña mientras graba ISO'
-                : 'Mezcla en vivo con los celulares (URL distinta a Sesión en vivo)'
-            }
-            style={{
-              padding: '6px 12px',
-              borderRadius: 8,
-              border:
-                workspaceMode === 'liveFusion' ? '2px solid #14b8a6' : '1px solid #334155',
-              background: workspaceMode === 'liveFusion' ? '#134e4a' : '#0f172a',
-              color: '#e2e8f0',
-              fontSize: 12,
-              fontWeight: workspaceMode === 'liveFusion' ? 700 : 500,
-              opacity: isoBusy ? 0.45 : 1
-            }}
-          >
-            2 · Fusión en vivo
-          </button>
-          <button
-            type="button"
-            role="tab"
             aria-selected={workspaceMode === 'fusion'}
             onClick={() => {
               if (isoBusy) {
                 setStatus(
                   pendingIsoSave
-                    ? 'Guardá o descartá la grabación ISO pendiente antes de pasar a modo Fusión.'
-                    : 'Detené la grabación ISO antes de pasar a modo Fusión.'
+                    ? 'Guardá o descartá la grabación pendiente (por pistas) antes de pasar a modo Fusión.'
+                    : 'Detené la grabación antes de pasar a modo Fusión.'
                 )
                 return
               }
@@ -892,8 +878,8 @@ export default function App() {
               isoBusy
                 ? pendingIsoSave
                   ? 'Guardá o descartá la grabación antes de usar Fusión'
-                  : 'No podés pasar a Fusión mientras graba ISO'
-                : 'Editar fusión con archivos ya guardados (paso 2)'
+                  : 'No podés pasar a Fusión mientras grabás'
+                : 'Editar fusión con archivos ya guardados (paso 2 después de Sesión en vivo)'
             }
             style={{
               padding: '6px 12px',
@@ -907,7 +893,45 @@ export default function App() {
               opacity: isoBusy ? 0.45 : 1
             }}
           >
-            3 · Fusión (archivos)
+            2 · Fusión (archivos)
+          </button>
+          <span aria-hidden style={{ color: '#475569', fontSize: 12, padding: '0 4px' }}>·</span>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={workspaceMode === 'liveFusion'}
+            onClick={() => {
+              if (isoBusy) {
+                setStatus(
+                  pendingIsoSave
+                    ? 'Guardá o descartá la grabación pendiente (por pistas) antes de pasar a Fusión en vivo.'
+                    : 'Detené la grabación antes de pasar a Fusión en vivo.'
+                )
+                return
+              }
+              setWorkspaceMode('liveFusion')
+            }}
+            disabled={isoBusy}
+            title={
+              isoBusy
+                ? pendingIsoSave
+                  ? 'Guardá o descartá la grabación antes de usar Fusión en vivo'
+                  : 'No podés cambiar de pestaña mientras grabás'
+                : 'Alternativa: mezcla en vivo con los celulares (graba ya mezclado, sin pistas separadas).'
+            }
+            style={{
+              padding: '6px 12px',
+              borderRadius: 8,
+              border:
+                workspaceMode === 'liveFusion' ? '2px solid #14b8a6' : '1px solid #334155',
+              background: workspaceMode === 'liveFusion' ? '#134e4a' : '#0f172a',
+              color: '#e2e8f0',
+              fontSize: 12,
+              fontWeight: workspaceMode === 'liveFusion' ? 700 : 500,
+              opacity: isoBusy ? 0.45 : 1
+            }}
+          >
+            Alt · Fusión en vivo
           </button>
         </div>
         <span
@@ -923,304 +947,22 @@ export default function App() {
           {signalingReady ? 'Señalización: OK' : 'Señalización: no'}
         </span>
         <span style={{ flex: 1 }} />
-        <button
-          type="button"
-          aria-expanded={settingsOpen}
-          onClick={() => setSettingsOpen((v) => !v)}
-          style={{
-            padding: '8px 14px',
-            borderRadius: 8,
-            border: '1px solid #334155',
-            background: settingsOpen ? '#1e293b' : '#0f172a',
-            color: '#e2e8f0',
-            fontWeight: 600
-          }}
-        >
-          {settingsOpen ? 'Ocultar configuración' : 'Configuración'}
-        </button>
       </header>
 
       <section style={{ padding: 16, flex: 1, overflow: 'auto' }}>
-        {settingsOpen ? (
-          <div
-            style={{
-              marginBottom: 16,
-              paddingBottom: 16,
-              borderBottom: '1px solid #1e293b'
-            }}
-          >
-            <div
-              style={{
-                fontSize: 12,
-                fontWeight: 700,
-                color: '#cbd5e1',
-                letterSpacing: 0.06,
-                textTransform: 'uppercase',
-                marginBottom: 14
-              }}
-            >
-              Configuración
-            </div>
-            <div style={{ marginBottom: 12, fontSize: 13, color: '#94a3b8' }}>
-          <div>
-            <strong style={{ color: '#e2e8f0' }}>URLs HTTPS para celulares (misma Wi-Fi):</strong>
-          </div>
-          <div style={{ marginTop: 6, fontSize: 12, color: '#78716c' }}>
-            La primera vez el navegador del celular mostrará una advertencia de certificado (normal en LAN). Continuá /
-            &quot;Avanzado&quot; y confiá en el sitio; después podrá usar la cámara en contexto seguro.
-          </div>
-          <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-            <span style={{ fontSize: 12, color: '#94a3b8' }}>Calidad de video (celulares):</span>
-            <select
-              value={videoPreset}
-              disabled={isoBusy}
-              onChange={(ev) => setVideoPreset(ev.target.value as VideoPresetId)}
-              style={{
-                padding: '6px 10px',
-                borderRadius: 8,
-                border: '1px solid #334155',
-                background: '#0f172a',
-                color: '#e2e8f0',
-                maxWidth: '100%'
-              }}
-            >
-              {VIDEO_PRESET_OPTIONS.map((o) => (
-                <option key={o.id} value={o.id} title={o.hint}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-            <span style={{ fontSize: 11, color: '#64748b' }}>
-              {VIDEO_PRESET_OPTIONS.find((o) => o.id === videoPreset)?.hint}
-            </span>
-          </div>
-          {workspaceMode === 'fusion' ? (
-            <div style={{ marginTop: 10, fontSize: 12, color: '#78716c', maxWidth: 560 }}>
-              Esta pestaña es solo para archivos: no hay URL de celular. Para transmitir, abrí la pestaña{' '}
-              <strong style={{ color: '#cbd5e1' }}>Sesión en vivo</strong> o <strong style={{ color: '#cbd5e1' }}>Fusión en vivo</strong>{' '}
-              y copiá la dirección que lista ahí (cada una lleva un parámetro distinto).
-            </div>
-          ) : !urls.length ? (
-            <div>No se detectaron IPs de LAN (¿Wi-Fi desconectado?).</div>
-          ) : (
-            urls.map((u) => (
-              <div key={u} style={{ marginTop: 6, wordBreak: 'break-all', color: '#cbd5e1' }}>
-                {u}
-              </div>
-            ))
-          )}
-
-          {urls.length > 0 ? (
-            <div style={{ marginTop: 12, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => {
-                  void window.studio.copyText(urls[0]!).then(() =>
-                    setStatus('URL copiada al portapapeles. Pegala en el navegador del celular (Chrome / Safari).')
-                  )
-                }}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 8,
-                  border: '1px solid #334155',
-                  background: '#1e293b',
-                  color: '#e2e8f0',
-                  fontSize: 12
-                }}
-              >
-                Copiar primera URL
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  void window.studio.exportCert().then((ok) =>
-                    setStatus(
-                      ok
-                        ? 'Certificado guardado. Pasalo al celular e instalalo (ver ayuda abajo).'
-                        : 'No se pudo exportar el certificado (¿guardaste antes que arrancara el servidor?).'
-                    )
-                  )
-                }
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 8,
-                  border: '1px solid #334155',
-                  background: '#422006',
-                  color: '#fde68a',
-                  fontSize: 12
-                }}
-              >
-                Exportar certificado (.crt)
-              </button>
-            </div>
-          ) : null}
-
-          <details style={{ marginTop: 14, fontSize: 12, color: '#94a3b8' }}>
-            <summary style={{ cursor: 'pointer', color: '#cbd5e1' }}>
-              HTTPS no carga o el celular no confía en la página
-            </summary>
-            <ol style={{ paddingLeft: 18, marginTop: 10, lineHeight: 1.55 }}>
-              <li>
-                Probar TLS desde el celular: abrí una URL de ping (debería verse el texto{' '}
-                <code style={{ color: '#86efac' }}>studio-live-ok</code>). Si no abre, revisá mismo Wi-Fi,
-                firewall en Windows (permitir Node/Electron en redes privadas) y que la IP sea la correcta.
-                <div style={{ marginTop: 8 }}>
-                  {pingUrls.map((u) => (
-                    <div key={u} style={{ wordBreak: 'break-all' }}>
-                      <code style={{ color: '#cbd5e1' }}>{u}</code>
-                    </div>
-                  ))}
-                </div>
-              </li>
-              <li style={{ marginTop: 10 }}>
-                En la PC, probá en Chrome/Edge:{' '}
-                <code style={{ wordBreak: 'break-all', color: '#cbd5e1' }}>{localPreviewUrl || '—'}</code>
-                . Si acá funciona y en el celular no, el problema suele ser confianza del certificado en el
-                teléfono.
-              </li>
-              <li style={{ marginTop: 10 }}>
-                <strong>Android:</strong> exportá el certificado con el botón de arriba, pasalo al teléfono y en
-                Ajustes → Seguridad → Cifrado / Credenciales → Instalar certificado → &quot;VPN y aplicaciones&quot;
-                o &quot;CA&quot; según tu versión. Después volvé a abrir la URL HTTPS.
-              </li>
-              <li style={{ marginTop: 8 }}>
-                <strong>iPhone:</strong> enviate el .crt por Mail/AirDrop, instalá el perfil en Ajustes y en
-                Ajustes → General → Información → Ajustes de confianza del certificado activá confianza para ese
-                perfil.
-              </li>
-              <li style={{ marginTop: 8 }}>
-                No abras el link dentro de WhatsApp: usá &quot;Abrir en Chrome&quot; o &quot;Abrir en Safari&quot;.
-              </li>
-            </ol>
-          </details>
-        </div>
-
-        <div
-          style={{
-            marginBottom: 16,
-            padding: 14,
-            borderRadius: 12,
-            border: '1px solid #243046',
-            background: '#0b1220',
-            maxWidth: 560
-          }}
-        >
-          <div style={{ fontSize: 13, color: '#e2e8f0', marginBottom: 8 }}>
-            <strong>Audio en esta PC</strong>
-            <span style={{ color: '#64748b', fontWeight: 400 }}>
-              {' '}
-              (interfaz / cóndenser vía dispositivo de grabación de Windows)
-            </span>
-          </div>
-          <div style={{ fontSize: 12, color: '#64748b', marginBottom: 10, lineHeight: 1.45 }}>
-            <strong style={{ color: '#94a3b8' }}>Opcional.</strong> Si no tenés interfaz enchufada o no querés audio
-            en la PC, no hace falta tocar nada acá:{' '}
-            <strong style={{ color: '#cbd5e1' }}>las cámaras del celular no dependen del audio de la PC.</strong>
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-            <select
-              value={selectedAudioDeviceId}
-              disabled={isoBusy}
-              onChange={(ev) => setSelectedAudioDeviceId(ev.target.value)}
-              style={{
-                flex: '1 1 220px',
-                minWidth: 200,
-                padding: '8px 10px',
-                borderRadius: 8,
-                border: '1px solid #334155',
-                background: '#0f172a',
-                color: '#e2e8f0'
-              }}
-            >
-              <option value="">Predeterminado de Windows</option>
-              {audioInputs.map((d) => (
-                <option key={d.deviceId} value={d.deviceId}>
-                  {d.label || `Entrada ${d.deviceId.slice(0, 8)}...`}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              disabled={isoBusy}
-              onClick={() => void preparePcAudio()}
-              style={{
-                padding: '8px 12px',
-                borderRadius: 8,
-                border: '1px solid #334155',
-                background: '#14532d',
-                color: '#dcfce7'
-              }}
-            >
-              {audioStream ? 'Reactivar audio' : 'Activar audio de PC'}
-            </button>
-          </div>
-          {audioNote ? (
-            <div style={{ marginTop: 10, fontSize: 12, color: '#fca5a5' }}>{audioNote}</div>
-          ) : null}
-          {audioStream ? (
-            <>
-              <div style={{ marginTop: 12 }}>
-                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 6 }}>Nivel de entrada</div>
-                <AudioLevelMeter stream={audioStream} />
-              </div>
-              <div style={{ marginTop: 10, fontSize: 12, color: '#86efac' }}>
-                Entrada activa: al grabar se guarda también un WebM de solo audio con el mismo número de sesión que las
-                cámaras.
-              </div>
-            </>
-          ) : (
-            <div style={{ marginTop: 10, fontSize: 12, color: '#64748b' }}>
-              El navegador no expone ASIO directamente: configurá la interfaz como entrada de grabación
-              predeterminado en Windows o elegila en la lista después de activar.
-            </div>
-          )}
-        </div>
-          </div>
-        ) : null}
-
         <div style={{ display: workspaceMode === 'live' ? 'block' : 'none' }}>
-        <div
-          style={{
-            marginBottom: 16,
-            padding: '12px 14px',
-            borderRadius: 12,
-            border: '1px solid #334155',
-            background: '#0a1628',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10
-          }}
-        >
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', letterSpacing: 0.06 }}>
-            Paso 1 · Grabación ISO (todas las pistas a la vez)
-          </div>
+        <div style={workspaceToolbar('sky')}>
+          <div style={workspaceEyebrow}>Paso 1 · Grabar por pistas (una pista por cámara + audio)</div>
           <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.55, maxWidth: 720 }}>
             <strong style={{ color: '#e2e8f0' }}>Transmitir desde el celular solo muestra el vídeo en la PC.</strong>{' '}
-            Para guardar archivos hace falta esta acción: se graban <strong style={{ color: '#e2e8f0' }}>al mismo tiempo</strong>{' '}
-            todas las cámaras conectadas y el audio de PC (si lo activaste). Al detener se te pide un{' '}
-            <strong style={{ color: '#e2e8f0' }}>nombre de carpeta</strong> (no puede repetirse si ya existe esa carpeta con archivos{' '}
-            <code style={{ color: '#cbd5e1' }}>.webm</code>) y los{' '}
-            <code style={{ color: '#cbd5e1' }}>cam-*.webm</code> / <code style={{ color: '#cbd5e1' }}>audio-*.webm</code> quedan{' '}
-            dentro de esa subcarpeta; después podés usar la fusión (paso 2) cargando esos archivos.
-          </div>
-          <div style={{ fontSize: 11, color: '#64748b' }}>
-            Fuentes que se incluyen si iniciás ISO ahora:{' '}
-            <span style={{ color: isoSourcesSummary.camCount || isoSourcesSummary.hasPcAudio ? '#86efac' : '#fbbf24' }}>
-              {isoSourcesSummary.label}
-            </span>
+            Para guardar archivos hace falta iniciar la grabación (botón abajo, cerca de las cámaras): se graban{' '}
+            <strong style={{ color: '#e2e8f0' }}>al mismo tiempo</strong> todas las cámaras conectadas y el audio de PC
+            (si lo activaste). Al detener se te pide un <strong style={{ color: '#e2e8f0' }}>nombre de carpeta</strong>{' '}
+            y los <code style={{ color: '#cbd5e1' }}>cam-*.webm</code> / <code style={{ color: '#cbd5e1' }}>audio-*.webm</code>{' '}
+            quedan dentro; después usás «Fusión» (paso 2) para mezclarlas.
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-            <span
-              style={{
-                fontSize: 11,
-                fontWeight: 700,
-                color: '#64748b',
-                letterSpacing: 0.08,
-                textTransform: 'uppercase'
-              }}
-            >
-              Carpeta y controles
-            </span>
+            <span style={workspaceActionRowLabel}>Carpeta y conexión</span>
             <button
               type="button"
               onClick={pickFolder}
@@ -1231,17 +973,88 @@ export default function App() {
                   : undefined
               }
               style={{
-                padding: '8px 12px',
-                borderRadius: 8,
-                border: '1px solid #334155',
-                background: '#0f172a',
-                color: '#e2e8f0',
+                ...btnNeutral,
                 opacity: pendingIsoSave ? 0.55 : 1,
                 cursor: pendingIsoSave ? 'not-allowed' : 'pointer'
               }}
             >
               Carpeta de grabación
             </button>
+            <button
+              type="button"
+              onClick={openQrPopover}
+              style={btnQr}
+              title="Abre un popover con el QR (mismo Wi-Fi) para escanear desde el celular."
+            >
+              <span aria-hidden style={{ fontSize: 14 }}>▦</span> QR de cámaras (Sesión en vivo)
+            </button>
+            <button
+              type="button"
+              onClick={openAudioPanel}
+              style={btnAudio}
+              title="Abre un panel flotante con selección de mic, nivel, ganancia y aviso de saturación."
+            >
+              <span aria-hidden style={{ fontSize: 14 }}>♪</span>
+              {audioStream ? ' Audio de PC · activo' : ' Audio de PC'}
+            </button>
+          </div>
+          {outputDir ? (
+            <div style={pathLineMuted}>
+              Carpeta: <span style={pathTextBright}>{outputDir}</span>
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: '#475569' }}>
+              Elegí carpeta de grabación para poder guardar WebM al detener.
+            </div>
+          )}
+        </div>
+
+        <div style={{ width: '100%', maxWidth: '100%' }}>
+          <div style={{ fontSize: 11, color: '#64748b', letterSpacing: 0.06, textTransform: 'uppercase', marginBottom: 10 }}>
+            Entradas en vivo — hasta 3 por fila · clic en el vídeo para ampliar · ↻ gira 90° · ✕ cierra la cámara
+          </div>
+          <div className="camera-grid">
+            {tileCameraIds.map((id) => (
+              <CameraTile
+                key={id}
+                cameraId={id}
+                stream={streams[id]}
+                rtcState={laneRtcState[id]}
+                rotateDeg={manualRotateDeg[id] ?? 0}
+                onRotate90={() => bumpRotate(id)}
+                onExpand={() => setExpandedCameraId(id)}
+                onClose={() => {
+                  if (expandedCameraId === id) setExpandedCameraId(null)
+                  closeCamera(id)
+                  setStatus(`Cámara ${id} cerrada desde el panel.`)
+                }}
+              />
+            ))}
+          </div>
+          {!tileCameraIds.length ? (
+            <div style={{ color: '#94a3b8', fontSize: 13, lineHeight: 1.5 }}>
+              <strong style={{ color: '#cbd5e1' }}>Esperando cámaras…</strong> Escaneá el{' '}
+              <strong style={{ color: '#e2e8f0' }}>QR de Sesión en vivo</strong> (botón arriba) con cada celular y tocá{' '}
+              <strong style={{ color: '#e2e8f0' }}>Transmitir</strong>. Si «Señalización» no pasa a OK en unos
+              segundos, reiniciá la app.
+            </div>
+          ) : null}
+        </div>
+
+        <div
+          style={{
+            marginTop: 14,
+            padding: '12px 14px',
+            borderRadius: 12,
+            border: recording ? '1px solid #7f1d1d' : '1px solid #334155',
+            background: recording ? '#1a0a0a' : '#0a1628',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8
+          }}
+        >
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+            <span style={workspaceActionRowLabel}>Grabación multicámara</span>
             <button
               type="button"
               disabled={Boolean(pendingIsoSave && !recording)}
@@ -1254,13 +1067,14 @@ export default function App() {
               }
               onClick={onRecordClick}
               style={{
-                padding: '8px 14px',
+                padding: '10px 18px',
                 borderRadius: 8,
                 border: '1px solid transparent',
                 background: recording ? '#b91c1c' : pendingIsoSave ? '#475569' : '#1d4ed8',
                 color: 'white',
                 cursor: pendingIsoSave && !recording ? 'not-allowed' : 'pointer',
-                fontWeight: 600,
+                fontWeight: 700,
+                fontSize: 13,
                 opacity: pendingIsoSave && !recording ? 0.75 : 1
               }}
             >
@@ -1268,42 +1082,15 @@ export default function App() {
                 ? 'Detener grabación'
                 : pendingIsoSave
                   ? 'Pendiente: nombre de carpeta…'
-                  : 'Iniciar grabación ISO'}
+                  : 'Iniciar grabación multicámara'}
             </button>
-            {urls.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => {
-                  void window.studio.copyText(urls[0]!).then(() =>
-                    setStatus('URL copiada al portapapeles. Pegala en el navegador del celular (Chrome / Safari).')
-                  )
-                }}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 8,
-                  border: '1px solid #334155',
-                  background: '#1e293b',
-                  color: '#e2e8f0',
-                  fontSize: 12
-                }}
-              >
-                Copiar primera URL
-              </button>
-            ) : null}
             {recording ? (
-              <span
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'baseline',
-                  gap: 10,
-                  flexShrink: 0
-                }}
-              >
-                <span style={{ fontSize: 12, fontWeight: 700, color: '#fca5a5' }}>● ISO</span>
+              <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 10, flexShrink: 0 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: '#fca5a5' }}>● REC</span>
                 <span
-                  title="Tiempo de esta grabación ISO"
+                  title="Tiempo de grabación (una pista por cámara + audio si aplica)"
                   style={{
-                    fontSize: 20,
+                    fontSize: 22,
                     fontWeight: 700,
                     fontVariantNumeric: 'tabular-nums',
                     fontFamily: 'ui-monospace, monospace',
@@ -1314,53 +1101,18 @@ export default function App() {
                   {isoElapsedLabel}
                 </span>
               </span>
-            ) : null}
-            <span
-              style={{
-                flex: '1 1 220px',
-                fontSize: 12,
-                color: '#94a3b8',
-                minWidth: 0,
-                lineHeight: 1.4
-              }}
-            >
+            ) : (
+              <span style={{ fontSize: 11, color: '#64748b' }}>
+                Fuentes:{' '}
+                <span style={{ color: isoSourcesSummary.camCount || isoSourcesSummary.hasPcAudio ? '#86efac' : '#fbbf24' }}>
+                  {isoSourcesSummary.label}
+                </span>
+              </span>
+            )}
+            <span style={{ flex: '1 1 220px', fontSize: 12, color: '#94a3b8', minWidth: 0, lineHeight: 1.4 }}>
               {status}
             </span>
           </div>
-          {outputDir ? (
-            <div style={{ fontSize: 11, color: '#64748b', wordBreak: 'break-all', lineHeight: 1.45 }}>
-              Carpeta: <span style={{ color: '#cbd5e1' }}>{outputDir}</span>
-            </div>
-          ) : (
-            <div style={{ fontSize: 11, color: '#475569' }}>
-              Elegí carpeta de grabación para poder guardar WebM al detener.
-            </div>
-          )}
-        </div>
-
-        <div style={{ width: '100%', maxWidth: '100%' }}>
-          <div style={{ fontSize: 11, color: '#64748b', letterSpacing: 0.06, textTransform: 'uppercase', marginBottom: 10 }}>
-            Entradas en vivo — hasta 3 por fila · clic en el vídeo para ampliar · ↻ gira 90° si queda de costado
-          </div>
-          <div className="camera-grid">
-            {tileCameraIds.map((id) => (
-              <CameraTile
-                key={id}
-                cameraId={id}
-                stream={streams[id]}
-                rtcState={laneRtcState[id]}
-                rotateDeg={manualRotateDeg[id] ?? 0}
-                onRotate90={() => bumpRotate(id)}
-                onExpand={() => setExpandedCameraId(id)}
-              />
-            ))}
-          </div>
-          {!tileCameraIds.length ? (
-            <div style={{ color: '#64748b', fontSize: 14 }}>
-              Esperando cámaras… Con Studio Live abierto en la PC, abrí la URL en el celular y tocá Transmitir. Si
-              &quot;Señalización&quot; no pasa a OK en unos segundos, reiniciá la app.
-            </div>
-          ) : null}
         </div>
 
         {expandedCameraId ? (
@@ -1375,6 +1127,49 @@ export default function App() {
         ) : null}
         </div>
 
+        <FloatingPcAudioPanel
+          open={audioPanelOpen && (workspaceMode === 'live' || workspaceMode === 'liveFusion')}
+          onClose={() => setAudioPanelOpen(false)}
+          disabled={isoBusy}
+          audioInputs={audioInputs}
+          selectedDeviceId={selectedAudioDeviceId}
+          onDeviceChange={setSelectedAudioDeviceId}
+          onActivate={() => void preparePcAudio()}
+          audioNote={audioNote}
+          rawStream={audioStream}
+          analyser={pcMix.analyser}
+          gainPercent={pcAudioGainPercent}
+          onGainPercentChange={setPcAudioGainPercent}
+        />
+
+        <QrConnectOverlay
+          open={qrOpen && workspaceMode !== 'fusion'}
+          onClose={() => setQrOpen(false)}
+          ips={info?.ips ?? []}
+          port={info?.port ?? null}
+          preset={videoPreset}
+          workspace={workspaceMode === 'liveFusion' ? 'liveFusion' : 'live'}
+          presetOptions={VIDEO_PRESET_OPTIONS}
+          onPresetChange={(id) => setVideoPreset(id as VideoPresetId)}
+          presetDisabled={isoBusy}
+          pingUrls={pingUrls}
+          localPreviewUrl={localPreviewUrl}
+          onCopyUrl={(u) => {
+            void window.studio.copyText(u).then(() =>
+              setStatus('URL copiada al portapapeles. Pegala en el navegador del celular (Chrome / Safari).')
+            )
+          }}
+          onExportCert={() => {
+            void window.studio.exportCert().then((ok) =>
+              setStatus(
+                ok
+                  ? 'Certificado guardado. Pasalo al celular e instalalo (ver ayuda del popover).'
+                  : 'No se pudo exportar el certificado (¿guardaste antes que arrancara el servidor?).'
+              )
+            )
+          }}
+        />
+
         <div style={{ display: workspaceMode === 'liveFusion' ? 'block' : 'none' }}>
           <LiveFusionPanel
             cameraIds={tileCameraIds}
@@ -1383,63 +1178,53 @@ export default function App() {
             manualRotateDeg={manualRotateDeg}
             onRotate90={bumpRotate}
             outputDir={outputDir}
-            audioStream={audioStream}
+            audioStream={pcRecordingStream}
             onStatus={setStatus}
             isoBusy={isoBusy}
             onPickOutputDir={() => void pickFolder()}
+            onOpenQr={openQrPopover}
+            onOpenAudio={openAudioPanel}
+            hasPcAudio={Boolean(audioStream)}
           />
         </div>
 
         <div style={{ display: workspaceMode === 'fusion' ? 'block' : 'none' }}>
-          <div
-            style={{
-              marginBottom: 14,
-              padding: '12px 14px',
-              borderRadius: 12,
-              border: '1px solid #4c1d95',
-              background: '#120618',
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 10,
-              alignItems: 'center'
-            }}
-          >
-            <span style={{ fontSize: 12, fontWeight: 700, color: '#e9d5ff' }}>Modo Fusión · archivos (paso 3)</span>
-            <span style={{ fontSize: 11, color: '#94a3b8', flex: '1 1 200px', lineHeight: 1.4 }}>
-              Acá cargás los <code style={{ color: '#cbd5e1' }}>cam-*.webm</code> ya grabados. Las URLs de celulares y la
-              cuadrícula en vivo están ocultas para no mezclar con una sesión nueva.
-            </span>
-            <button
-              type="button"
-              onClick={() => void pickFolder()}
-              style={{
-                padding: '8px 12px',
-                borderRadius: 8,
-                border: '1px solid #334155',
-                background: '#0f172a',
-                color: '#e2e8f0',
-                fontSize: 12
-              }}
-            >
-              Carpeta de grabación
-            </button>
-            <button
-              type="button"
-              onClick={() => setWorkspaceMode('live')}
-              style={{
-                padding: '8px 12px',
-                borderRadius: 8,
-                border: '1px solid #334155',
-                background: '#1e293b',
-                color: '#e2e8f0',
-                fontSize: 12,
-                fontWeight: 600
-              }}
-            >
-              Volver a sesión en vivo
-            </button>
+          <div style={workspaceToolbar('violet')}>
+            <div style={workspaceEyebrow}>Paso 2 · Fusión con archivos (post-grabación)</div>
+            <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.55, maxWidth: 720 }}>
+              Acá cargás los <code style={{ color: '#cbd5e1' }}>cam-*.webm</code> ya grabados del paso 1. La cuadrícula en
+              vivo y el QR de celulares están en las otras pestañas para no mezclar sesiones.
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+              <span style={workspaceActionRowLabel}>Carpeta y navegación</span>
+              <button type="button" onClick={() => void pickFolder()} style={btnNeutral}>
+                Carpeta de grabación
+              </button>
+              <button
+                type="button"
+                onClick={() => setWorkspaceMode('live')}
+                style={{ ...btnNeutral, fontWeight: 600 }}
+              >
+                Volver a sesión en vivo
+              </button>
+            </div>
+            {outputDir ? (
+              <div style={pathLineMuted}>
+                Carpeta: <span style={pathTextBright}>{outputDir}</span>
+              </div>
+            ) : (
+              <div style={warnLineNoFolder}>
+                <strong style={{ color: '#fef3c7' }}>Sin carpeta elegida.</strong> Tocá «Carpeta de grabación» en esta
+                barra (o «Elegir carpeta…» en el panel de abajo si ya scrolleaste) para poder guardar la fusión exportada.
+              </div>
+            )}
           </div>
-          <FusionPanel outputDir={outputDir} liveRecording={isoBusy} onStatus={setStatus} />
+          <FusionPanel
+            outputDir={outputDir}
+            liveRecording={isoBusy}
+            onStatus={setStatus}
+            onPickOutputDir={() => void pickFolder()}
+          />
         </div>
       </section>
 
@@ -1471,7 +1256,7 @@ export default function App() {
             }}
           >
             <div id="iso-save-title" style={{ fontSize: 16, fontWeight: 700, color: '#e2e8f0', marginBottom: 8 }}>
-              Guardar grabación ISO
+              Guardar grabación
             </div>
             <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14, lineHeight: 1.5 }}>
               Elegí un nombre para la subcarpeta dentro de{' '}
@@ -1543,89 +1328,6 @@ export default function App() {
         </div>
       ) : null}
     </div>
-  )
-}
-
-function AudioLevelMeter({ stream }: { stream: MediaStream }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const decayRef = useRef(0)
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas || !stream.getAudioTracks().length) return
-
-    decayRef.current = 0
-
-    const AC =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-    if (!AC) return
-
-    const audioCtx = new AC()
-    const src = audioCtx.createMediaStreamSource(stream)
-    const analyser = audioCtx.createAnalyser()
-    analyser.fftSize = 1024
-    analyser.smoothingTimeConstant = 0.55
-    src.connect(analyser)
-
-    const buf = new Uint8Array(analyser.fftSize)
-    let raf = 0
-
-    const draw = () => {
-      void audioCtx.resume()
-      analyser.getByteTimeDomainData(buf)
-      let sum = 0
-      for (let i = 0; i < buf.length; i++) {
-        const x = (buf[i]! - 128) / 128
-        sum += x * x
-      }
-      const rms = Math.sqrt(sum / buf.length)
-      const instant = Math.min(1, rms * 4.2)
-      decayRef.current = Math.max(instant, decayRef.current * 0.94)
-
-      const ctx = canvas.getContext('2d')
-      const dpr = window.devicePixelRatio || 1
-      const cssW = canvas.clientWidth || 320
-      const cssH = 14
-      canvas.width = Math.floor(cssW * dpr)
-      canvas.height = Math.floor(cssH * dpr)
-      if (ctx) {
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-        ctx.fillStyle = '#1e293b'
-        ctx.fillRect(0, 0, cssW, cssH)
-        const wFill = cssW * decayRef.current
-        const grd = ctx.createLinearGradient(0, 0, cssW, 0)
-        grd.addColorStop(0, '#22c55e')
-        grd.addColorStop(0.72, '#eab308')
-        grd.addColorStop(1, '#ef4444')
-        ctx.fillStyle = grd
-        ctx.fillRect(0, 0, wFill, cssH)
-      }
-
-      raf = requestAnimationFrame(draw)
-    }
-    draw()
-
-    return () => {
-      cancelAnimationFrame(raf)
-      src.disconnect()
-      analyser.disconnect()
-      void audioCtx.close()
-    }
-  }, [stream])
-
-  return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        width: '100%',
-        maxWidth: 420,
-        height: 14,
-        display: 'block',
-        borderRadius: 6,
-        border: '1px solid #334155'
-      }}
-    />
   )
 }
 
@@ -1754,7 +1456,8 @@ function CameraTile({
   rtcState,
   rotateDeg,
   onRotate90,
-  onExpand
+  onExpand,
+  onClose
 }: {
   cameraId: string
   stream?: MediaStream
@@ -1762,6 +1465,7 @@ function CameraTile({
   rotateDeg: number
   onRotate90: () => void
   onExpand: () => void
+  onClose: () => void
 }) {
   const ref = useRef<HTMLVideoElement>(null)
   const hasVideo = Boolean(stream?.getVideoTracks().some((t) => t.readyState === 'live'))
@@ -1823,27 +1527,50 @@ function CameraTile({
             <span style={{ color: '#64748b' }}>·</span>
             <span style={{ color: '#cbd5e1' }}>{label}</span>
           </div>
-          <button
-            type="button"
-            title="Girar imagen 90° si el celu en horizontal se ve de costado"
-            onClick={(e) => {
-              e.stopPropagation()
-              onRotate90()
-            }}
-            style={{
-              flexShrink: 0,
-              padding: '4px 10px',
-              fontSize: 15,
-              lineHeight: 1,
-              borderRadius: 8,
-              border: '1px solid #475569',
-              background: '#1e293b',
-              color: '#e2e8f0',
-              cursor: 'pointer'
-            }}
-          >
-            ↻
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <button
+              type="button"
+              title="Girar imagen 90° si el celu en horizontal se ve de costado"
+              onClick={(e) => {
+                e.stopPropagation()
+                onRotate90()
+              }}
+              style={{
+                padding: '4px 10px',
+                fontSize: 15,
+                lineHeight: 1,
+                borderRadius: 8,
+                border: '1px solid #475569',
+                background: '#1e293b',
+                color: '#e2e8f0',
+                cursor: 'pointer'
+              }}
+            >
+              ↻
+            </button>
+            <button
+              type="button"
+              title="Cerrar / desconectar esta cámara (útil si quedó colgada o duplicada)"
+              aria-label={`Cerrar cámara ${cameraId}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                onClose()
+              }}
+              style={{
+                padding: '4px 9px',
+                fontSize: 14,
+                lineHeight: 1,
+                borderRadius: 8,
+                border: '1px solid #7f1d1d',
+                background: '#3f0a0a',
+                color: '#fecaca',
+                cursor: 'pointer',
+                fontWeight: 700
+              }}
+            >
+              ✕
+            </button>
+          </div>
         </div>
         <div
           role="button"

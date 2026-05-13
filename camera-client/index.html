@@ -481,8 +481,62 @@
       let cameraId
       let pc
       let localStream
+      let isTransmitting = false
 
       const pendingRemoteIce = []
+
+      function setMainButtonIdle(label) {
+        btn.textContent = label
+        btn.disabled = false
+        btn.style.background = ''
+      }
+
+      function setMainButtonStreaming() {
+        btn.textContent = 'Detener transmisión'
+        btn.disabled = false
+        btn.style.background = '#b91c1c'
+      }
+
+      function stopTransmission(opts) {
+        cancelZoomAnimation()
+        try {
+          if (pc) {
+            pc.getSenders().forEach((s) => {
+              try {
+                if (s.track) s.track.stop()
+              } catch (_) {}
+            })
+            pc.close()
+          }
+        } catch (_) {}
+        pc = null
+        pendingRemoteIce.length = 0
+
+        if (localStream) {
+          try {
+            localStream.getTracks().forEach((t) => t.stop())
+          } catch (_) {}
+        }
+        localStream = null
+        pv.srcObject = null
+        splash.classList.remove('hidden')
+        torchOn = false
+        isTransmitting = false
+        camEnv.disabled = true
+        camUser.disabled = true
+        updateTorchAvailability()
+        updateZoomUi()
+
+        setMainButtonIdle('Volver a transmitir')
+        if (!opts || !opts.silent) {
+          log('Transmisión detenida. Tocá «Volver a transmitir» para enviar video a la PC otra vez.')
+        }
+
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          camEnv.disabled = false
+          camUser.disabled = false
+        }
+      }
 
       function flushRemoteIce() {
         while (pendingRemoteIce.length && pc?.remoteDescription) {
@@ -824,19 +878,27 @@
           }
         }
 
-        ws.onclose = () => log('Señalización cerrada. Refrescá la página.')
+        ws.onclose = () => {
+          if (isTransmitting) stopTransmission({ silent: true })
+          log('Señalización cerrada. Refrescá la página para volver a conectar.')
+        }
 
         ws.onerror = () => log('Error de red / WebSocket.')
       }
 
       btn.addEventListener('click', async () => {
+        if (isTransmitting) {
+          stopTransmission()
+          return
+        }
         try {
           await startCamera()
-          btn.disabled = true
-          btn.textContent = 'Transmitiendo…'
+          isTransmitting = true
+          setMainButtonStreaming()
         } catch (e) {
           log('No se pudo usar la cámara:', e?.message || e)
-          btn.disabled = false
+          isTransmitting = false
+          setMainButtonIdle('Transmitir (pantalla completa)')
         }
       })
 

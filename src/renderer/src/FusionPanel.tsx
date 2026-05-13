@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
+  btnNeutral,
+  pathLineMuted,
+  pathTextBright,
+  warnLineNoFolder,
+  workspaceEyebrow,
+  workspaceInnerCard
+} from './workspaceChrome'
+
+import {
   isFusionExportFileName,
   parseRecordingFileName,
   type ParsedRecordingName
@@ -143,9 +152,11 @@ type FusionPanelProps = {
   outputDir: string | null
   liveRecording: boolean
   onStatus: (msg: string) => void
+  /** Abre el diálogo de carpeta (misma carpeta que el paso 1). Opcional por compatibilidad. */
+  onPickOutputDir?: () => void | Promise<void>
 }
 
-export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelProps) {
+export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDir }: FusionPanelProps) {
   const [clips, setClips] = useState<VideoClip[]>([])
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<number | null>(null)
@@ -975,22 +986,8 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
     fusionPreviewUrl !== null
 
   return (
-    <div
-      style={{
-        marginBottom: 16,
-        padding: '14px 14px',
-        borderRadius: 12,
-        border: '1px solid #334155',
-        background: '#080f18',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-        position: 'relative'
-      }}
-    >
-      <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', letterSpacing: 0.08, textTransform: 'uppercase' }}>
-        Paso 2 · Fusión en tiempo real (después del ISO)
-      </div>
+    <div style={workspaceInnerCard}>
+      <div style={workspaceEyebrow}>Paso 2 · Fusión con archivos (mezcla las pistas grabadas en el paso 1)</div>
       <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.45 }}>
         Cuando ya tengas guardados los archivos del paso 1, cargá los <code style={{ color: '#cbd5e1' }}>cam-*.webm</code>{' '}
         de una misma sesión y, si grabaste, <code style={{ color: '#cbd5e1' }}>audio-*.webm</code>. Reproducí, elegí qué
@@ -998,6 +995,51 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
         (eso es solo el resultado exportado). En Windows, si la carpeta parece vacía, abrí «Tipo de archivo» en el
         explorador y elegí «Todos los archivos».
       </div>
+
+      {outputDir ? (
+        <div style={pathLineMuted}>
+          Carpeta: <span style={pathTextBright}>{outputDir}</span>
+        </div>
+      ) : (
+        <div
+          style={{
+            padding: '10px 12px',
+            borderRadius: 10,
+            border: '1px solid #854d0e',
+            background: '#1c1410',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 10,
+            alignItems: 'center',
+            justifyContent: 'space-between'
+          }}
+        >
+          <div style={{ ...warnLineNoFolder, flex: '1 1 240px', minWidth: 0 }}>
+            <strong style={{ color: '#fef3c7' }}>Falta elegir carpeta.</strong> Sin carpeta no podés guardar la fusión
+            (WebM o MP4) ni usar «Guardar en carpeta de grabación». Elegila con «Carpeta de grabación» en la barra superior
+            de esta pestaña
+            {onPickOutputDir ? ', o con el botón de acá' : ''}.
+          </div>
+          {onPickOutputDir ? (
+            <button
+              type="button"
+              disabled={liveRecording}
+              onClick={() => void onPickOutputDir()}
+              style={{
+                ...btnNeutral,
+                border: '1px solid #b45309',
+                background: liveRecording ? '#334155' : '#78350f',
+                color: '#fffbeb',
+                fontWeight: 600,
+                cursor: liveRecording ? 'not-allowed' : 'pointer',
+                flexShrink: 0
+              }}
+            >
+              Elegir carpeta de grabación…
+            </button>
+          ) : null}
+        </div>
+      )}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         <button
@@ -1266,8 +1308,8 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
                       Vista previa del archivo grabado
                     </div>
                     <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8, lineHeight: 1.4 }}>
-                      «Reproducir vista previa» solo mueve el WebM exportado; la mezcla ISO de arriba no se reproduce con
-                      ese botón. La línea de tiempo sigue controlando las pistas ISO; si movés el tiempo ahí, la vista
+                      «Reproducir vista previa» solo mueve el WebM exportado; la mezcla de arriba no se reproduce con
+                      ese botón. La línea de tiempo sigue controlando las pistas cargadas; si movés el tiempo ahí, la vista
                       previa salta al mismo instante relativo. Pantalla completa / Esc; sin ícono duplicado en el vídeo.
                       {' '}
                       Podés guardar WebM (rápido) o MP4 H.264 (mejor en el Reproductor de Windows / barra de tiempo).
@@ -1548,11 +1590,6 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
                 </span>
               ) : null}
             </div>
-            {!outputDir ? (
-              <div style={{ fontSize: 11, color: '#fbbf24', marginTop: 6 }}>
-                Definí la carpeta de grabación arriba para poder guardar la fusión.
-              </div>
-            ) : null}
           </div>
 
           {selectorMode === 'thumbnails' ? (

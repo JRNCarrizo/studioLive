@@ -1,5 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 
+import {
+  btnAudio,
+  btnNeutral,
+  btnQr,
+  pathLineMuted,
+  pathTextBright,
+  warnLineNoFolder,
+  workspaceActionRowLabel,
+  workspaceEyebrow,
+  workspaceToolbar
+} from './workspaceChrome'
+
 export type LiveMixMode = 'manual' | 'auto'
 
 /** Director por reglas (sin IA): orden fijo o azar ponderado por pesos por cámara. */
@@ -35,6 +47,12 @@ type LiveFusionPanelProps = {
   isoBusy: boolean
   /** Igual que en Sesión en vivo: diálogo para elegir carpeta de grabación. */
   onPickOutputDir: () => void | Promise<void>
+  /** Abre el popover con el QR + calidad + troubleshooting. */
+  onOpenQr: () => void
+  /** Abre el panel flotante de audio de PC (selector, nivel post-ganancia, fader). */
+  onOpenAudio: () => void
+  /** Indica si ya hay un audio de PC activo (para etiquetar el botón). */
+  hasPcAudio: boolean
 }
 
 function pickLiveProgramRecorderMime(): string | undefined {
@@ -222,7 +240,10 @@ export function LiveFusionPanel({
   audioStream,
   onStatus,
   isoBusy,
-  onPickOutputDir
+  onPickOutputDir,
+  onOpenQr,
+  onOpenAudio,
+  hasPcAudio
 }: LiveFusionPanelProps) {
   const [mixMode, setMixMode] = useState<LiveMixMode>('manual')
   const [programCameraId, setProgramCameraId] = useState<string | null>(null)
@@ -557,7 +578,7 @@ export function LiveFusionPanel({
 
   const startProgramRecording = useCallback(() => {
     if (isoBusy) {
-      onStatus('No podés grabar el programa mientras hay grabación ISO pendiente o en curso.')
+      onStatus('No podés grabar el programa mientras hay una grabación por pistas pendiente o en curso.')
       return
     }
     if (!outputDir) {
@@ -669,71 +690,55 @@ export function LiveFusionPanel({
   const disabledProgramRec = isoBusy || !cameraIds.length
 
   return (
-    <div
-      style={{
-        marginBottom: 16,
-        padding: '14px 14px',
-        borderRadius: 12,
-        border: '1px solid #155e75',
-        background: '#080f18',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 12,
-        position: 'relative'
-      }}
-    >
-      <div style={{ fontSize: 11, fontWeight: 700, color: '#64748b', letterSpacing: 0.08, textTransform: 'uppercase' }}>
-        Fusión en vivo · programa y grabación
-      </div>
-      <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.5, maxWidth: 880 }}>
-        <strong style={{ color: '#e2e8f0' }}>Importante:</strong> en el celular tenés que abrir la URL que incluye{' '}
-        <code style={{ color: '#cbd5e1' }}>studioWorkspace=liveFusion</code> (copiala desde Configuración con esta pestaña
-        activa). La pestaña «Sesión en vivo» usa otra URL: si mezclás, no verás video aquí. Las miniaturas de la derecha son
+    <div style={workspaceToolbar('teal')}>
+      <div style={workspaceEyebrow}>Alternativa · Fusión en vivo (graba ya mezclado, sin pistas separadas)</div>
+      <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.55, maxWidth: 880 }}>
+        <strong style={{ color: '#e2e8f0' }}>Importante:</strong> cada pestaña genera <strong style={{ color: '#e2e8f0' }}>su propio QR</strong>.
+        Para que las cámaras aparezcan acá, escaneá el QR de <em>esta</em> pestaña (Fusión en vivo) en cada celular. El QR de
+        «Sesión en vivo» no sirve para mezclar — los celulares quedan en la otra pestaña. Las miniaturas de la derecha son
         cada transmisión; tocá una para mandarla al <strong style={{ color: '#e2e8f0' }}>Programa</strong> (centro).
       </div>
-
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 10,
-          alignItems: 'center',
-          padding: '10px 12px',
-          borderRadius: 10,
-          border: '1px solid #1e3a3a',
-          background: '#05201e'
-        }}
-      >
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#5eead4', letterSpacing: 0.06 }}>Archivos</span>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+        <span style={workspaceActionRowLabel}>Carpeta y conexión</span>
         <button
           type="button"
           disabled={programRecording}
           onClick={() => void onPickOutputDir()}
           style={{
-            padding: '8px 14px',
-            borderRadius: 8,
-            border: '1px solid #334155',
-            background: programRecording ? '#334155' : '#0f172a',
-            color: '#e2e8f0',
+            ...btnNeutral,
             fontWeight: 600,
-            cursor: programRecording ? 'not-allowed' : 'pointer'
+            cursor: programRecording ? 'not-allowed' : 'pointer',
+            opacity: programRecording ? 0.55 : 1
           }}
         >
           Carpeta de grabación
         </button>
-        {outputDir ? (
-          <span style={{ fontSize: 11, color: '#94a3b8', wordBreak: 'break-all', flex: '1 1 220px', lineHeight: 1.4 }}>
-            {outputDir}
-          </span>
-        ) : (
-          <span style={{ fontSize: 11, color: '#fbbf24', flex: '1 1 200px' }}>
-            Elegí la carpeta donde guardar el WebM del programa al grabar.
-          </span>
-        )}
+        <button type="button" onClick={onOpenQr} style={btnQr} title="Abre un popover con el QR (mismo Wi-Fi).">
+          <span aria-hidden style={{ fontSize: 14 }}>▦</span> QR de cámaras (Fusión en vivo)
+        </button>
+        <button
+          type="button"
+          onClick={onOpenAudio}
+          style={btnAudio}
+          title="Abre el panel flotante de audio: mic, nivel, ganancia y CLIP."
+        >
+          <span aria-hidden style={{ fontSize: 14 }}>♪</span>
+          {hasPcAudio ? ' Audio de PC · activo' : ' Audio de PC'}
+        </button>
       </div>
+      {outputDir ? (
+        <div style={pathLineMuted}>
+          Carpeta: <span style={pathTextBright}>{outputDir}</span>
+        </div>
+      ) : (
+        <div style={warnLineNoFolder}>
+          <strong style={{ color: '#fef3c7' }}>Sin carpeta elegida.</strong> Elegí dónde guardar el WebM del programa al
+          grabar la mezcla (misma carpeta base que en Sesión en vivo).
+        </div>
+      )}
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-        <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', letterSpacing: 0.06 }}>Mezcla</span>
+        <span style={workspaceActionRowLabel}>Mezcla</span>
         <button
           type="button"
           onClick={() => setMixMode('manual')}
@@ -1263,9 +1268,9 @@ export function LiveFusionPanel({
 
       {!cameraIds.length ? (
         <div style={{ color: '#94a3b8', fontSize: 13, lineHeight: 1.5 }}>
-          <strong style={{ color: '#fca5a5' }}>No hay video:</strong> revisá que estés en esta pestaña al copiar la URL, que
-          en el celular la barra de dirección muestre <code style={{ color: '#cbd5e1' }}>studioWorkspace=liveFusion</code>, y
-          que hayas tocado Transmitir después de cambiar de pestaña en la PC.
+          <strong style={{ color: '#fca5a5' }}>No hay video:</strong> escaneá el <strong style={{ color: '#e2e8f0' }}>QR
+          de Fusión en vivo</strong> (botón arriba) con cada celular y tocá <strong style={{ color: '#e2e8f0' }}>Transmitir</strong>.
+          Recordá que el QR de «Sesión en vivo» no sirve acá — cada pestaña usa el suyo.
         </div>
       ) : null}
     </div>
