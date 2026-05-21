@@ -1,8 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { useCameraAliases } from './cameraAliases'
+import {
+  DISPLAY_CAPTURE_ID_PREFIX,
+  acquireDesktopStreamFromSourceId,
+  configureDisplayCaptureVideoTrack,
+  defaultDisplayCaptureLabel,
+  displayCaptureLabelFromTrack,
+  displaySourceKind,
+  isDisplayCaptureId
+} from './displayCapture'
+import { DisplayCapturePicker } from './DisplayCapturePicker'
+import { resetSourceHealthSamples } from './sourceHealth'
 import { FloatingPcAudioPanel, readStoredPcAudioGainPercent } from './FloatingPcAudioPanel'
 import { FusionPanel } from './FusionPanel'
+import { IsoRecordingReviewOverlay } from './IsoRecordingReviewOverlay'
+import { FusionStudioTransport } from './FusionStudioTransport'
 import { LiveFusionPanel } from './LiveFusionPanel'
 import { QrConnectOverlay } from './QrConnectOverlay'
 import { usePcAudioMix } from './usePcAudioMix'
@@ -87,26 +100,48 @@ function folderLeafFromPath(fullPath: string): string {
   return i >= 0 ? t.slice(i + 1) : t
 }
 
+function pickAudioRecorderMime(): string | undefined {
+  const candidates = ['audio/webm;codecs=opus', 'audio/webm']
+  if (typeof MediaRecorder === 'undefined') return undefined
+  return candidates.find((c) => MediaRecorder.isTypeSupported(c))
+}
+
 /**
- * VP8 delante: al grabar varias ISO a la vez el PC re-codifica cada pista; VP9 suele cargar más el CPU y favorecer fotogramas caídos.
- * (Misma idea que la fusión en `FusionPanel.tsx`.)
+ * Si el stream no tiene audio en vivo, evitamos MIME con `,opus`: en Chromium
+ * `MediaRecorder.start()` suele fallar al muxar Opus sin pista de audio.
  */
-function pickRecorderMime(): string | undefined {
-  const candidates = [
+function pickIsoCameraRecorderMime(stream: MediaStream): string | undefined {
+  if (typeof MediaRecorder === 'undefined') return undefined
+  const hasLiveAudio = stream.getAudioTracks().some((t) => t.readyState === 'live' && t.enabled !== false)
+  const videoOnly = ['video/webm;codecs=vp8', 'video/webm;codecs=vp9', 'video/webm']
+  const withOpus = [
     'video/webm;codecs=vp8,opus',
     'video/webm;codecs=vp9,opus',
     'video/webm;codecs=vp8',
     'video/webm;codecs=vp9',
     'video/webm'
   ]
-  if (typeof MediaRecorder === 'undefined') return undefined
-  return candidates.find((c) => MediaRecorder.isTypeSupported(c))
+  const list = hasLiveAudio ? withOpus : videoOnly
+  return list.find((c) => MediaRecorder.isTypeSupported(c))
 }
 
-function pickAudioRecorderMime(): string | undefined {
-  const candidates = ['audio/webm;codecs=opus', 'audio/webm']
-  if (typeof MediaRecorder === 'undefined') return undefined
-  return candidates.find((c) => MediaRecorder.isTypeSupported(c))
+const ISO_RECORDER_TIMESLICE_MS = 500
+
+function startIsoMediaRecorder(stream: MediaStream, chunks: BlobPart[], optionAttempts: MediaRecorderOptions[]): MediaRecorder {
+  let lastMsg = 'MediaRecorder'
+  for (const opts of optionAttempts) {
+    try {
+      const rec = new MediaRecorder(stream, opts)
+      rec.ondataavailable = (e) => {
+        if (e.data.size) chunks.push(e.data)
+      }
+      rec.start(ISO_RECORDER_TIMESLICE_MS)
+      return rec
+    } catch (e) {
+      lastMsg = e instanceof Error ? e.message : String(e)
+    }
+  }
+  throw new Error(lastMsg)
 }
 
 const pcAudioConstraints = {
@@ -132,6 +167,9 @@ function isoVideoBitsPerSecondForPreset(preset: VideoPresetId): number {
 }
 
 const ISO_AUDIO_BITS_PER_SECOND = 160_000
+
+const ISO_RECORDER_CAN_PAUSE =
+  typeof MediaRecorder !== 'undefined' && typeof MediaRecorder.prototype.pause === 'function'
 
 const VIDEO_PRESET_OPTIONS: {
   id: VideoPresetId
@@ -167,11 +205,18 @@ export default function App() {
   const [streams, setStreams] = useState<Record<string, MediaStream>>({})
   const [outputDir, setOutputDir] = useState<string | null>(null)
   const [recording, setRecording] = useState(false)
-  /** Tras detener ISO: blobs en memoria hasta elegir nombre de carpeta y guardar. */
+  const [isoPaused, setIsoPaused] = useState(false)
+  /** Tras detener ISO: blobs en memoria hasta vista previa + guardar o descartar. */
   const [pendingIsoSave, setPendingIsoSave] = useState<PendingIsoSave | null>(null)
   const [isoFolderNameDraft, setIsoFolderNameDraft] = useState('')
+  /** URLs de objeto para reproducir las tomas en memoria antes de guardar a disco. */
+  const [isoPreviewUrls, setIsoPreviewUrls] = useState<Record<string, string>>({})
+  /** Toma activa en la vista previa post-grabación (un reproductor grande a la vez). */
+  const [isoPreviewSelectedKey, setIsoPreviewSelectedKey] = useState<string>('')
+  const [isoPreviewStageFs, setIsoPreviewStageFs] = useState(false)
+  const isoPreviewStageRef = useRef<HTMLDivElement | null>(null)
 
-  /** Grabando ISO o con archivos en memoria esperando nombre de carpeta. */
+  /** Grabando ISO o con tomas en memoria esperando vista previa / guardado. */
   const isoBusy = recording || pendingIsoSave != null
 
   const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([])
@@ -182,6 +227,7 @@ export default function App() {
   const [videoPreset, setVideoPreset] = useState<VideoPresetId>('medium')
   const [signalingReady, setSignalingReady] = useState(false)
   const [qrOpen, setQrOpen] = useState(false)
+  const [displayCapturePickerOpen, setDisplayCapturePickerOpen] = useState(false)
   /** Cartelito flotante "Grabación guardada" tras confirmar el nombre de la carpeta. */
   const [isoSavedToast, setIsoSavedToast] = useState<{ folder: string; path: string } | null>(null)
   const [audioPanelOpen, setAudioPanelOpen] = useState(false)
@@ -200,6 +246,50 @@ export default function App() {
   /** Alias amigables por cameraId, persistidos en localStorage. */
   const cameraAliases = useCameraAliases()
 
+  const isoPreviewItemsSorted = useMemo(() => {
+    if (!pendingIsoSave) return []
+    return [...pendingIsoSave.items].sort((a, b) => {
+      if (a.recKey === PC_AUDIO_RECORDER_KEY) return 1
+      if (b.recKey === PC_AUDIO_RECORDER_KEY) return -1
+      return a.recKey.localeCompare(b.recKey)
+    })
+  }, [pendingIsoSave])
+
+  useEffect(() => {
+    if (!isoPreviewItemsSorted.length) {
+      setIsoPreviewSelectedKey('')
+      return
+    }
+    setIsoPreviewSelectedKey((k) =>
+      k && isoPreviewItemsSorted.some((i) => i.recKey === k) ? k : isoPreviewItemsSorted[0]!.recKey
+    )
+  }, [isoPreviewItemsSorted])
+
+  useEffect(() => {
+    const onFs = () => setIsoPreviewStageFs(Boolean(document.fullscreenElement))
+    document.addEventListener('fullscreenchange', onFs)
+    return () => document.removeEventListener('fullscreenchange', onFs)
+  }, [])
+
+  useEffect(() => {
+    if (!pendingIsoSave && document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {})
+    }
+  }, [pendingIsoSave])
+
+  const isoPreviewActive = useMemo(() => {
+    if (!isoPreviewSelectedKey) return null
+    const item = isoPreviewItemsSorted.find((i) => i.recKey === isoPreviewSelectedKey)
+    if (!item) return null
+    const url = isoPreviewUrls[item.recKey]
+    return {
+      item,
+      url,
+      label: item.recKey === PC_AUDIO_RECORDER_KEY ? 'Audio de PC' : cameraAliases.resolve(item.recKey),
+      isAudio: item.mime.startsWith('audio/')
+    }
+  }, [isoPreviewSelectedKey, isoPreviewItemsSorted, isoPreviewUrls, cameraAliases])
+
   const bumpRotate = useCallback((id: string) => {
     setManualRotateDeg((prev) => ({
       ...prev,
@@ -217,6 +307,9 @@ export default function App() {
   const sessionRef = useRef<number>(0)
   /** Inicio de la grabación ISO actual (para cronómetro). */
   const isoRecordingStartedAtRef = useRef<number | null>(null)
+  const isoPausedTotalMsRef = useRef(0)
+  const isoPauseStartedAtRef = useRef<number | null>(null)
+  const displayCaptureSeqRef = useRef(0)
   const openQrPopover = useCallback(() => {
     setQrOpen(true)
   }, [])
@@ -309,30 +402,105 @@ export default function App() {
     }
   }, [])
 
-  const closeCamera = useCallback((cameraId: string) => {
-    const pc = pcsRef.current.get(cameraId)
-    if (pc) {
-      pc.close()
-      pcsRef.current.delete(cameraId)
+  const closeVideoSource = useCallback((sourceId: string) => {
+    if (!isDisplayCaptureId(sourceId)) {
+      const pc = pcsRef.current.get(sourceId)
+      if (pc) {
+        pc.close()
+        pcsRef.current.delete(sourceId)
+      }
+      iceQueuesRef.current.delete(sourceId)
+      setCameras((prev) => prev.filter((id) => id !== sourceId))
     }
-    iceQueuesRef.current.delete(cameraId)
+
     setStreams((prev) => {
+      const stream = prev[sourceId]
+      stream?.getTracks().forEach((t) => t.stop())
       const n = { ...prev }
-      delete n[cameraId]
+      delete n[sourceId]
       return n
     })
-    setCameras((prev) => prev.filter((id) => id !== cameraId))
     setLaneRtcState((prev) => {
       const n = { ...prev }
-      delete n[cameraId]
+      delete n[sourceId]
       return n
     })
     setManualRotateDeg((prev) => {
       const n = { ...prev }
-      delete n[cameraId]
+      delete n[sourceId]
       return n
     })
   }, [])
+
+  /** Alias histórico: cierra cámara WebRTC o captura de pantalla. */
+  const closeCamera = closeVideoSource
+
+  const attachDisplayStream = useCallback(
+    (stream: MediaStream, kindLabel: string, pickerSourceId: string) => {
+      const vt = stream.getVideoTracks()[0]
+      if (!vt) {
+        stream.getTracks().forEach((t) => t.stop())
+        setStatus('No se obtuvo vídeo de la captura.')
+        return
+      }
+
+      displayCaptureSeqRef.current += 1
+      const id = `${DISPLAY_CAPTURE_ID_PREFIX}${displayCaptureSeqRef.current}`
+      const defaultAlias = defaultDisplayCaptureLabel(displayCaptureSeqRef.current)
+      resetSourceHealthSamples(id)
+
+      vt.onended = () => {
+        closeVideoSource(id)
+        setStatus(`Captura «${kindLabel}» finalizada (cerraste el compartir en el sistema).`)
+      }
+
+      setStreams((prev) => ({ ...prev, [id]: stream }))
+      setLaneRtcState((prev) => ({ ...prev, [id]: 'connected' }))
+      if (!cameraAliases.aliases[id]) {
+        cameraAliases.setAlias(id, defaultAlias)
+      }
+      const captureKind = displaySourceKind(pickerSourceId)
+      const screenTip =
+        captureKind === 'window'
+          ? ' Si un vídeo (YouTube, etc.) se ve quieto, cerrá esta fuente y capturá la pantalla completa (monitor), no la ventana del navegador.'
+          : captureKind === 'screen'
+            ? ' Un solo monitor: minimizá Studio Live desde la barra de tareas para que no tape el tutorial. Comprobá en la mini que diga «Se mueve».'
+            : ''
+      setStatus(
+        `${kindLabel} agregada como fuente «${defaultAlias}». Se graba con las demás al iniciar ISO. Evitá capturar la ventana de Studio Live (efecto espejo).${screenTip}`
+      )
+    },
+    [cameraAliases, closeVideoSource]
+  )
+
+  const addDisplayCapture = useCallback(() => {
+    if (!window.studio?.listDisplaySources) {
+      setStatus('Captura de pantalla solo disponible en la app Studio Live (Electron).')
+      return
+    }
+    setDisplayCapturePickerOpen(true)
+  }, [])
+
+  const onDisplaySourcePicked = useCallback(
+    async (sourceId: string) => {
+      setDisplayCapturePickerOpen(false)
+      try {
+        const stream = await acquireDesktopStreamFromSourceId(sourceId)
+        const vt = stream.getVideoTracks()[0]
+        const kindLabel = displayCaptureLabelFromTrack(vt) ?? 'Pantalla'
+        attachDisplayStream(stream, kindLabel, sourceId)
+      } catch (e) {
+        const name = e instanceof Error ? e.name : ''
+        if (name === 'NotAllowedError' || name === 'AbortError') {
+          setStatus('Captura cancelada o denegada.')
+          return
+        }
+        const msg = e instanceof Error ? e.message : String(e)
+        setStatus(`No se pudo capturar pantalla/ventana: ${msg}`)
+      }
+    },
+    [attachDisplayStream]
+  )
 
   /** Una sola pestaña «activa» para las cámaras: al cambiar se cierran los PeerConnections en la PC. */
   const workspaceSwitchSkipRef = useRef(true)
@@ -342,13 +510,24 @@ export default function App() {
       return
     }
     for (const id of [...pcsRef.current.keys()]) {
-      closeCamera(id)
+      closeVideoSource(id)
     }
+    setStreams((prev) => {
+      let changed = false
+      const n = { ...prev }
+      for (const [id, stream] of Object.entries(prev)) {
+        if (!isDisplayCaptureId(id)) continue
+        stream.getTracks().forEach((t) => t.stop())
+        delete n[id]
+        changed = true
+      }
+      return changed ? n : prev
+    })
     setExpandedCameraId(null)
     setStatus(
       'Pestaña cambiada: se cerraron las conexiones WebRTC de la sesión anterior. Escaneá de nuevo el QR de esta pestaña en cada celular y tocá Transmitir.'
     )
-  }, [workspaceMode, closeCamera])
+  }, [workspaceMode, closeVideoSource])
 
   const handleOffer = useCallback(async (cameraId: string, sdp: string, workspaceRaw?: StudioCameraWorkspace) => {
     // No usar signalingOkRef aquí: si la insignia «Señalización» falla pero el IPC sí entrega ofertas,
@@ -438,7 +617,7 @@ export default function App() {
     if (!info) return
 
     let cancelled = false
-    let intervalId: ReturnType<typeof setInterval> | undefined
+    let intervalId: number | undefined
 
     const dispatchSig = async (raw: string) => {
       let msg: SigMsg
@@ -588,7 +767,7 @@ export default function App() {
     isoRecordingStartedAtRef.current = started
 
     const fmt = (elapsedMs: number) => {
-      const s = Math.floor(elapsedMs / 1000)
+      const s = Math.max(0, Math.floor(elapsedMs / 1000))
       const h = Math.floor(s / 3600)
       const m = Math.floor((s % 3600) / 60)
       const sec = s % 60
@@ -598,11 +777,38 @@ export default function App() {
       return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
     }
 
-    const tick = () => setIsoElapsedLabel(fmt(Date.now() - started))
+    const elapsedMs = () => {
+      let ms = Date.now() - started - isoPausedTotalMsRef.current
+      if (isoPaused && isoPauseStartedAtRef.current != null) {
+        ms -= Date.now() - isoPauseStartedAtRef.current
+      }
+      return ms
+    }
+
+    const tick = () => setIsoElapsedLabel(fmt(elapsedMs()))
     tick()
     const id = window.setInterval(tick, 250)
     return () => window.clearInterval(id)
-  }, [recording])
+  }, [recording, isoPaused])
+
+  useEffect(() => {
+    if (!pendingIsoSave) {
+      setIsoPreviewUrls((prev) => {
+        for (const u of Object.values(prev)) URL.revokeObjectURL(u)
+        return {}
+      })
+      return
+    }
+    const next: Record<string, string> = {}
+    for (const item of pendingIsoSave.items) {
+      const blob = new Blob(item.parts, { type: item.mime })
+      next[item.recKey] = URL.createObjectURL(blob)
+    }
+    setIsoPreviewUrls(next)
+    return () => {
+      for (const u of Object.values(next)) URL.revokeObjectURL(u)
+    }
+  }, [pendingIsoSave])
 
   const stopRecording = useCallback(async () => {
     const recMap = recordersRef.current
@@ -641,6 +847,9 @@ export default function App() {
 
     chunksMap.clear()
     isoRecordingStartedAtRef.current = null
+    isoPausedTotalMsRef.current = 0
+    isoPauseStartedAtRef.current = null
+    setIsoPaused(false)
     setRecording(false)
 
     if (!items.length) {
@@ -651,9 +860,60 @@ export default function App() {
     setPendingIsoSave({ session, items })
     setIsoFolderNameDraft(defaultIsoFolderLabel(session))
     setStatus(
-      'Grabación detenida. Elegí un nombre de carpeta y tocá Guardar (no puede repetirse si ya existe esa carpeta con .webm).'
+      'Grabación detenida. Revisá la vista previa de cada toma; después elegí carpeta y Guardar en disco o Descartar.'
     )
   }, [])
+
+  const pauseIsoRecording = useCallback(() => {
+    if (!recording || isoPaused) return
+    if (!ISO_RECORDER_CAN_PAUSE) {
+      setStatus('Este entorno no permite pausar la grabación ISO (sin MediaRecorder.pause).')
+      return
+    }
+    let any = false
+    for (const rec of recordersRef.current.values()) {
+      if (rec.state === 'recording') {
+        try {
+          rec.pause()
+          any = true
+        } catch {
+          /* vacío */
+        }
+      }
+    }
+    if (!any) {
+      setStatus('No hay pistas en grabación para pausar.')
+      return
+    }
+    isoPauseStartedAtRef.current = Date.now()
+    setIsoPaused(true)
+    setStatus('Grabación en pausa. Tocá Continuar para seguir en la misma toma o Finalizar para cerrar.')
+  }, [recording, isoPaused])
+
+  const resumeIsoRecording = useCallback(() => {
+    if (!recording || !isoPaused) return
+    let any = false
+    for (const rec of recordersRef.current.values()) {
+      if (rec.state === 'paused') {
+        try {
+          rec.resume()
+          any = true
+        } catch {
+          /* vacío */
+        }
+      }
+    }
+    if (!any) {
+      setStatus('No hay pistas pausadas para reanudar.')
+      return
+    }
+    if (isoPauseStartedAtRef.current != null) {
+      isoPausedTotalMsRef.current += Date.now() - isoPauseStartedAtRef.current
+      isoPauseStartedAtRef.current = null
+    }
+    setIsoPaused(false)
+    setStatus('Grabación reanudada.')
+  }, [recording, isoPaused])
 
   const confirmIsoSave = useCallback(async () => {
     if (!pendingIsoSave || !outputDir) return
@@ -700,17 +960,29 @@ export default function App() {
     setStatus('Grabación descartada (no se guardó ningún archivo).')
   }, [pendingIsoSave])
 
+  const toggleIsoPreviewStageFullscreen = useCallback(() => {
+    const el = isoPreviewStageRef.current
+    if (!el) return
+    if (!document.fullscreenElement) {
+      const p =
+        el.requestFullscreen?.() ??
+        (el as unknown as { webkitRequestFullscreen?: () => Promise<void> | void }).webkitRequestFullscreen?.()
+      if (p && typeof (p as Promise<void>).then === 'function') void (p as Promise<void>).catch(() => {})
+    } else {
+      void document.exitFullscreen().catch(() => {})
+    }
+  }, [])
+
   const startRecording = useCallback(async () => {
     if (!outputDir) {
       setStatus('Elegí una carpeta de grabación antes.')
       return
     }
     if (pendingIsoSave) {
-      setStatus('Primero guardá o descartá la grabación anterior (ventana de nombre de carpeta).')
+      setStatus('Primero guardá o descartá la grabación anterior (revisión y nombre de carpeta).')
       return
     }
 
-    const videoMime = pickRecorderMime()
     const audioMime = pickAudioRecorderMime()
     const isoVideoBps = isoVideoBitsPerSecondForPreset(videoPreset)
     sessionRef.current = Date.now()
@@ -728,32 +1000,28 @@ export default function App() {
         const chunks: BlobPart[] = []
         chunksRef.current.set(id, chunks)
 
-        const rec = videoMime
-          ? new MediaRecorder(stream, { mimeType: videoMime, videoBitsPerSecond: isoVideoBps })
-          : new MediaRecorder(stream, { videoBitsPerSecond: isoVideoBps })
-        rec.ondataavailable = (e) => {
-          if (e.data.size) chunks.push(e.data)
-        }
+        const camMime = pickIsoCameraRecorderMime(stream)
+        const attempts: MediaRecorderOptions[] = []
+        if (camMime) attempts.push({ mimeType: camMime, videoBitsPerSecond: isoVideoBps })
+        attempts.push({ videoBitsPerSecond: isoVideoBps })
+        attempts.push({})
+
+        const rec = startIsoMediaRecorder(stream, chunks, attempts)
         recordersRef.current.set(id, rec)
-        /** Chunk cada 500 ms: menos callbacks al hilo principal que 250 ms (varias cámaras a la vez). */
-        rec.start(500)
       }
 
       if (pcRecordingStream?.getAudioTracks().length) {
         anyTrack = true
         const chunks: BlobPart[] = []
         chunksRef.current.set(PC_AUDIO_RECORDER_KEY, chunks)
-        const rec = audioMime
-          ? new MediaRecorder(pcRecordingStream, {
-              mimeType: audioMime,
-              audioBitsPerSecond: ISO_AUDIO_BITS_PER_SECOND
-            })
-          : new MediaRecorder(pcRecordingStream, { audioBitsPerSecond: ISO_AUDIO_BITS_PER_SECOND })
-        rec.ondataavailable = (e) => {
-          if (e.data.size) chunks.push(e.data)
-        }
+
+        const attempts: MediaRecorderOptions[] = []
+        if (audioMime) attempts.push({ mimeType: audioMime, audioBitsPerSecond: ISO_AUDIO_BITS_PER_SECOND })
+        attempts.push({ audioBitsPerSecond: ISO_AUDIO_BITS_PER_SECOND })
+        attempts.push({})
+
+        const rec = startIsoMediaRecorder(pcRecordingStream, chunks, attempts)
         recordersRef.current.set(PC_AUDIO_RECORDER_KEY, rec)
-        rec.start(500)
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
@@ -778,10 +1046,18 @@ export default function App() {
       return
     }
 
+    const hasDisplayCapture = Object.keys(streams).some((id) => isDisplayCaptureId(id))
+    const displayReminder = hasDisplayCapture
+      ? ' Si capturaste pantalla: en Fusión en vivo la mini debe decir «Se mueve» (si dice «Parece congelada», no grabes).'
+      : ''
+
     isoRecordingStartedAtRef.current = Date.now()
+    isoPausedTotalMsRef.current = 0
+    isoPauseStartedAtRef.current = null
+    setIsoPaused(false)
     setRecording(true)
     setStatus(
-      'Grabación en curso: un archivo por cada cámara en vivo + audio de PC si está activo. Detené para escribir los archivos.'
+      `Grabación en curso: un archivo por cada cámara en vivo + audio de PC si está activo. Detené para escribir los archivos.${displayReminder}`
     )
   }, [pcRecordingStream, outputDir, pendingIsoSave, streams, videoPreset])
 
@@ -795,13 +1071,10 @@ export default function App() {
     }
   }
 
-  const onRecordClick = () => {
-    if (recording) {
-      void toggleRecord()
-      return
-    }
+  const onIsoStartClick = () => {
+    if (recording) return
     if (pendingIsoSave) {
-      setStatus('Primero guardá o descartá la grabación anterior (ventana de nombre de carpeta).')
+      setStatus('Primero guardá o descartá la grabación anterior (revisión y nombre de carpeta).')
       return
     }
     if (!outputDir) {
@@ -817,7 +1090,7 @@ export default function App() {
       openQrPopover()
       setStatus(
         hasPcAudio
-          ? 'No hay cámaras conectadas. Escaneá el QR con cada celular y tocá Transmitir, o seguí sólo con audio de PC reapretando «Iniciar grabación multicámara».'
+          ? 'No hay cámaras conectadas. Escaneá el QR con cada celular y tocá Transmitir, o seguí sólo con audio de PC y volvé a pulsar Grabar.'
           : 'No hay cámaras conectadas. Escaneá el QR con cada celular y tocá Transmitir, o activá «Audio de PC» (botón verde) si vas a grabar sólo audio.'
       )
       return
@@ -971,9 +1244,10 @@ export default function App() {
             <strong style={{ color: '#e2e8f0' }}>Transmitir desde el celular solo muestra el vídeo en la PC.</strong>{' '}
             Para guardar archivos hace falta iniciar la grabación (botón abajo, cerca de las cámaras): se graban{' '}
             <strong style={{ color: '#e2e8f0' }}>al mismo tiempo</strong> todas las cámaras conectadas y el audio de PC
-            (si lo activaste). Al detener se te pide un <strong style={{ color: '#e2e8f0' }}>nombre de carpeta</strong>{' '}
-            y los <code style={{ color: '#cbd5e1' }}>cam-*.webm</code> / <code style={{ color: '#cbd5e1' }}>audio-*.webm</code>{' '}
-            quedan dentro; después usás «Fusión» (paso 2) para mezclarlas.
+            (si lo activaste). Al detener podés <strong style={{ color: '#e2e8f0' }}>previsualizar cada toma</strong>; después
+            elegís <strong style={{ color: '#e2e8f0' }}>guardar en disco</strong> (nombre de carpeta) o descartar. Los{' '}
+            <code style={{ color: '#cbd5e1' }}>cam-*.webm</code> / <code style={{ color: '#cbd5e1' }}>audio-*.webm</code>{' '}
+            se escriben solo al confirmar; después usás «Fusión» (paso 2) para mezclarlas.
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
             <span style={workspaceActionRowLabel}>Carpeta y conexión</span>
@@ -1011,6 +1285,24 @@ export default function App() {
               <span aria-hidden style={{ fontSize: 14 }}>♪</span>
               {audioStream ? ' Audio de PC · activo' : ' Audio de PC'}
             </button>
+            <button
+              type="button"
+              disabled={isoBusy}
+              onClick={() => void addDisplayCapture()}
+              style={{
+                ...btnNeutral,
+                fontWeight: 600,
+                opacity: isoBusy ? 0.55 : 1,
+                cursor: isoBusy ? 'not-allowed' : 'pointer'
+              }}
+              title={
+                isoBusy
+                  ? 'No podés agregar captura mientras hay grabación pendiente o en curso.'
+                  : 'Selector de Windows: pantalla completa o una ventana (fuente en esta PC).'
+              }
+            >
+              <span aria-hidden style={{ fontSize: 14 }}>⧉</span> Pantalla / ventana
+            </button>
           </div>
           {outputDir ? (
             <div style={pathLineMuted}>
@@ -1025,7 +1317,7 @@ export default function App() {
 
         <div style={{ width: '100%', maxWidth: '100%' }}>
           <div style={{ fontSize: 11, color: '#64748b', letterSpacing: 0.06, textTransform: 'uppercase', marginBottom: 10 }}>
-            Entradas en vivo — hasta 3 por fila · clic en el vídeo para ampliar · ↻ gira 90° · ✕ cierra la cámara
+            Entradas en vivo — celulares, pantalla/ventana (PC) · clic para ampliar · ↻ gira 90° (cámaras) · ✕ cierra
           </div>
           <div className="camera-grid">
             {tileCameraIds.map((id) => (
@@ -1039,10 +1331,15 @@ export default function App() {
                 rotateDeg={manualRotateDeg[id] ?? 0}
                 onRotate90={() => bumpRotate(id)}
                 onExpand={() => setExpandedCameraId(id)}
+                allowRotate={!isDisplayCaptureId(id)}
                 onClose={() => {
                   if (expandedCameraId === id) setExpandedCameraId(null)
-                  closeCamera(id)
-                  setStatus(`Cámara ${cameraAliases.resolve(id)} cerrada desde el panel.`)
+                  closeVideoSource(id)
+                  setStatus(
+                    isDisplayCaptureId(id)
+                      ? `Captura ${cameraAliases.resolve(id)} cerrada.`
+                      : `Cámara ${cameraAliases.resolve(id)} cerrada desde el panel.`
+                  )
                 }}
               />
             ))}
@@ -1057,79 +1354,28 @@ export default function App() {
           ) : null}
         </div>
 
-        <div
-          style={{
-            marginTop: 14,
-            padding: '12px 14px',
-            borderRadius: 12,
-            border: recording ? '1px solid #7f1d1d' : '1px solid #334155',
-            background: recording ? '#1a0a0a' : '#0a1628',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8
-          }}
-        >
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-            <span style={workspaceActionRowLabel}>Grabación multicámara</span>
-            <button
-              type="button"
-              disabled={Boolean(pendingIsoSave && !recording)}
-              title={
-                recording
-                  ? 'Finaliza la grabación; después elegís el nombre de carpeta y se guardan los WebM.'
-                  : pendingIsoSave
-                    ? 'Primero guardá o descartá la grabación pendiente (ventana de nombre).'
-                    : 'Inicia grabación simultánea: un archivo por cámara (+ audio PC si aplica). Requiere carpeta y al menos una fuente.'
-              }
-              onClick={onRecordClick}
-              style={{
-                padding: '10px 18px',
-                borderRadius: 8,
-                border: '1px solid transparent',
-                background: recording ? '#b91c1c' : pendingIsoSave ? '#475569' : '#1d4ed8',
-                color: 'white',
-                cursor: pendingIsoSave && !recording ? 'not-allowed' : 'pointer',
-                fontWeight: 700,
-                fontSize: 13,
-                opacity: pendingIsoSave && !recording ? 0.75 : 1
-              }}
-            >
-              {recording
-                ? 'Finalizar grabación'
-                : pendingIsoSave
-                  ? 'Pendiente: nombre de carpeta…'
-                  : 'Iniciar grabación multicámara'}
-            </button>
-            {recording ? (
-              <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 10, flexShrink: 0 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: '#fca5a5' }}>● REC</span>
-                <span
-                  title="Tiempo de grabación (una pista por cámara + audio si aplica)"
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 700,
-                    fontVariantNumeric: 'tabular-nums',
-                    fontFamily: 'ui-monospace, monospace',
-                    color: '#fecaca',
-                    letterSpacing: 0.04
-                  }}
-                >
-                  {isoElapsedLabel}
-                </span>
-              </span>
-            ) : (
-              <span style={{ fontSize: 11, color: '#64748b' }}>
-                Fuentes:{' '}
-                <span style={{ color: isoSourcesSummary.camCount || isoSourcesSummary.hasPcAudio ? '#86efac' : '#fbbf24' }}>
-                  {isoSourcesSummary.label}
-                </span>
-              </span>
-            )}
-            <span style={{ flex: '1 1 220px', fontSize: 12, color: '#94a3b8', minWidth: 0, lineHeight: 1.4 }}>
-              {status}
-            </span>
-          </div>
-        </div>
+        <FusionStudioTransport
+          mode="iso"
+          visible
+          phase={
+            pendingIsoSave && !recording
+              ? 'pending'
+              : recording
+                ? isoPaused
+                  ? 'paused'
+                  : 'recording'
+                : 'idle'
+          }
+          elapsedLabel={isoElapsedLabel}
+          sourcesLabel={isoSourcesSummary.label}
+          pauseSupported={ISO_RECORDER_CAN_PAUSE}
+          canStart={!isoBusy && Boolean(outputDir)}
+          onStart={onIsoStartClick}
+          onPause={pauseIsoRecording}
+          onResume={resumeIsoRecording}
+          onStop={() => void stopRecording()}
+          statusLine={status}
+        />
 
         {expandedCameraId ? (
           <CameraExpandOverlay
@@ -1140,6 +1386,7 @@ export default function App() {
             rotateDeg={manualRotateDeg[expandedCameraId] ?? 0}
             onRotate90={() => bumpRotate(expandedCameraId)}
             onClose={() => setExpandedCameraId(null)}
+            allowRotate={!isDisplayCaptureId(expandedCameraId)}
           />
         ) : null}
         </div>
@@ -1187,6 +1434,12 @@ export default function App() {
           }}
         />
 
+        <DisplayCapturePicker
+          open={displayCapturePickerOpen}
+          onClose={() => setDisplayCapturePickerOpen(false)}
+          onPick={(sourceId) => void onDisplaySourcePicked(sourceId)}
+        />
+
         <div style={{ display: workspaceMode === 'liveFusion' ? 'block' : 'none' }}>
           <LiveFusionPanel
             cameraIds={tileCameraIds}
@@ -1194,6 +1447,7 @@ export default function App() {
             rtcStates={laneRtcState}
             manualRotateDeg={manualRotateDeg}
             onRotate90={bumpRotate}
+            onCloseSource={closeVideoSource}
             outputDir={outputDir}
             audioStream={pcRecordingStream}
             onStatus={setStatus}
@@ -1202,6 +1456,7 @@ export default function App() {
             onOpenQr={openQrPopover}
             onOpenAudio={openAudioPanel}
             hasPcAudio={Boolean(audioStream)}
+            onAddDisplayCapture={addDisplayCapture}
           />
         </div>
 
@@ -1232,117 +1487,31 @@ export default function App() {
             ) : (
               <div style={warnLineNoFolder}>
                 <strong style={{ color: '#fef3c7' }}>Sin carpeta elegida.</strong> Tocá «Carpeta de grabación» en esta
-                barra (o «Elegir carpeta…» en el panel de abajo si ya scrolleaste) para poder guardar la fusión exportada.
+                barra para poder guardar la fusión exportada.
               </div>
             )}
           </div>
-          <FusionPanel
-            outputDir={outputDir}
-            liveRecording={isoBusy}
-            onStatus={setStatus}
-            onPickOutputDir={() => void pickFolder()}
-          />
+          <FusionPanel outputDir={outputDir} liveRecording={isoBusy} onStatus={setStatus} />
         </div>
       </section>
 
       {pendingIsoSave ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="iso-save-title"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 10000,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 16,
-            background: 'rgba(2, 6, 23, 0.78)',
-            backdropFilter: 'blur(4px)'
-          }}
-        >
-          <div
-            style={{
-              width: 'min(440px, 100%)',
-              padding: 20,
-              borderRadius: 12,
-              background: '#0f172a',
-              border: '1px solid #334155',
-              boxShadow: '0 25px 50px rgba(0,0,0,0.55)'
-            }}
-          >
-            <div id="iso-save-title" style={{ fontSize: 16, fontWeight: 700, color: '#e2e8f0', marginBottom: 8 }}>
-              Guardar grabación
-            </div>
-            <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 14, lineHeight: 1.5 }}>
-              Elegí un nombre para la subcarpeta dentro de{' '}
-              <span style={{ color: '#cbd5e1', wordBreak: 'break-all' }}>{outputDir ?? '—'}</span>. No podés repetir un
-              nombre si ya existe una carpeta igual (sin importar mayúsculas) con archivos{' '}
-              <code style={{ color: '#cbd5e1' }}>.webm</code>.
-            </div>
-            <label htmlFor="iso-folder-name" style={{ fontSize: 11, fontWeight: 600, color: '#64748b' }}>
-              Nombre de la carpeta
-            </label>
-            <input
-              id="iso-folder-name"
-              type="text"
-              autoFocus
-              value={isoFolderNameDraft}
-              onChange={(e) => setIsoFolderNameDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  void confirmIsoSave()
-                }
-              }}
-              style={{
-                display: 'block',
-                width: '100%',
-                marginTop: 6,
-                padding: '10px 12px',
-                borderRadius: 8,
-                border: '1px solid #475569',
-                background: '#020617',
-                color: '#f1f5f9',
-                fontSize: 14,
-                boxSizing: 'border-box'
-              }}
-            />
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 18 }}>
-              <button
-                type="button"
-                onClick={() => void confirmIsoSave()}
-                style={{
-                  padding: '10px 16px',
-                  borderRadius: 8,
-                  border: '1px solid #15803d',
-                  background: '#166534',
-                  color: '#ecfccb',
-                  fontWeight: 700,
-                  cursor: 'pointer'
-                }}
-              >
-                Guardar en disco
-              </button>
-              <button
-                type="button"
-                onClick={() => discardPendingIso()}
-                style={{
-                  padding: '10px 16px',
-                  borderRadius: 8,
-                  border: '1px solid #475569',
-                  background: '#1e293b',
-                  color: '#e2e8f0',
-                  fontWeight: 600,
-                  cursor: 'pointer'
-                }}
-              >
-                Descartar
-              </button>
-            </div>
-          </div>
-        </div>
+        <IsoRecordingReviewOverlay
+          outputDir={outputDir}
+          isoFolderNameDraft={isoFolderNameDraft}
+          onFolderDraftChange={setIsoFolderNameDraft}
+          onConfirmSave={confirmIsoSave}
+          onDiscard={discardPendingIso}
+          itemsSorted={isoPreviewItemsSorted}
+          selectedKey={isoPreviewSelectedKey}
+          onSelectKey={setIsoPreviewSelectedKey}
+          active={isoPreviewActive}
+          stageRef={isoPreviewStageRef}
+          stageFullscreen={isoPreviewStageFs}
+          onToggleStageFullscreen={toggleIsoPreviewStageFullscreen}
+          pcAudioPreviewUrl={isoPreviewUrls[PC_AUDIO_RECORDER_KEY] ?? null}
+          resolveAlias={cameraAliases.resolve}
+        />
       ) : null}
 
       {isoSavedToast ? (
@@ -1489,10 +1658,14 @@ function useVideoIntrinsicDimensions(
   return dims
 }
 
-function rtcStatusLabel(rtcState: string | undefined, hasVideo: boolean): string {
+function rtcStatusLabel(
+  rtcState: string | undefined,
+  hasVideo: boolean,
+  isDisplayCapture?: boolean
+): string {
   if (!rtcState || rtcState === 'new') return 'Esperando…'
   if (rtcState === 'connected')
-    return hasVideo ? 'En vivo' : 'Sin video…'
+    return hasVideo ? (isDisplayCapture ? 'Captura' : 'En vivo') : 'Sin video…'
   if (rtcState === 'connecting' || rtcState === 'checking') return 'Uniendo…'
   if (rtcState === 'failed') return 'Falló'
   return rtcState
@@ -1546,7 +1719,8 @@ function CameraTile({
   rotateDeg,
   onRotate90,
   onExpand,
-  onClose
+  onClose,
+  allowRotate = true
 }: {
   cameraId: string
   alias: string | null
@@ -1557,6 +1731,8 @@ function CameraTile({
   onRotate90: () => void
   onExpand: () => void
   onClose: () => void
+  /** Falso en captura de pantalla/ventana (no tiene sentido rotar). */
+  allowRotate?: boolean
 }) {
   const ref = useRef<HTMLVideoElement>(null)
   const hasVideo = Boolean(stream?.getVideoTracks().some((t) => t.readyState === 'live'))
@@ -1571,8 +1747,19 @@ function CameraTile({
     const el = ref.current
     if (!el) return
     el.srcObject = stream ?? null
+    const vt = stream?.getVideoTracks()[0]
+    if (vt && isDisplayCaptureId(cameraId)) configureDisplayCaptureVideoTrack(vt)
     if (stream?.getVideoTracks().length) void el.play().catch(() => {})
-  }, [stream])
+  }, [stream, cameraId])
+
+  useEffect(() => {
+    if (!isDisplayCaptureId(cameraId) || !stream) return
+    const id = window.setInterval(() => {
+      const el = ref.current
+      if (el?.paused) void el.play().catch(() => {})
+    }, 1500)
+    return () => window.clearInterval(id)
+  }, [cameraId, stream])
 
   useEffect(() => {
     if (!editing) setDraftAlias(alias ?? '')
@@ -1600,7 +1787,7 @@ function CameraTile({
   }
 
   const accent = laneAccentColor(rtcState, hasVideo)
-  const label = rtcStatusLabel(rtcState, hasVideo)
+  const label = rtcStatusLabel(rtcState, hasVideo, isDisplayCaptureId(cameraId))
   const displayName = alias && alias.length ? alias : cameraId
 
   return (
@@ -1724,26 +1911,28 @@ function CameraTile({
             >
               ✎
             </button>
-            <button
-              type="button"
-              title="Girar imagen 90° si el celu en horizontal se ve de costado"
-              onClick={(e) => {
-                e.stopPropagation()
-                onRotate90()
-              }}
-              style={{
-                padding: '4px 10px',
-                fontSize: 15,
-                lineHeight: 1,
-                borderRadius: 8,
-                border: '1px solid #475569',
-                background: '#1e293b',
-                color: '#e2e8f0',
-                cursor: 'pointer'
-              }}
-            >
-              ↻
-            </button>
+            {allowRotate ? (
+              <button
+                type="button"
+                title="Girar imagen 90° si el celu en horizontal se ve de costado"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onRotate90()
+                }}
+                style={{
+                  padding: '4px 10px',
+                  fontSize: 15,
+                  lineHeight: 1,
+                  borderRadius: 8,
+                  border: '1px solid #475569',
+                  background: '#1e293b',
+                  color: '#e2e8f0',
+                  cursor: 'pointer'
+                }}
+              >
+                ↻
+              </button>
+            ) : null}
             <button
               type="button"
               title="Cerrar / desconectar esta cámara (útil si quedó colgada o duplicada)"
@@ -1826,7 +2015,8 @@ function CameraExpandOverlay({
   rtcState,
   rotateDeg,
   onRotate90,
-  onClose
+  onClose,
+  allowRotate = true
 }: {
   cameraId: string
   alias?: string | null
@@ -1835,6 +2025,7 @@ function CameraExpandOverlay({
   rotateDeg: number
   onRotate90: () => void
   onClose: () => void
+  allowRotate?: boolean
 }) {
   const ref = useRef<HTMLVideoElement>(null)
   const hasVideo = Boolean(stream?.getVideoTracks().some((t) => t.readyState === 'live'))
@@ -1926,26 +2117,28 @@ function CameraExpandOverlay({
                 border: `1px solid ${accent}66`
               }}
             >
-              {rtcStatusLabel(rtcState, hasVideo)}
+              {rtcStatusLabel(rtcState, hasVideo, isDisplayCaptureId(cameraId))}
             </span>
           </div>
           <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-            <button
-              type="button"
-              title="Girar la imagen 90°"
-              onClick={onRotate90}
-              style={{
-                padding: '10px 14px',
-                borderRadius: 10,
-                border: '1px solid #475569',
-                background: '#1e293b',
-                color: '#f1f5f9',
-                fontWeight: 600,
-                cursor: 'pointer'
-              }}
-            >
-              ↻ 90°
-            </button>
+            {allowRotate ? (
+              <button
+                type="button"
+                title="Girar la imagen 90°"
+                onClick={onRotate90}
+                style={{
+                  padding: '10px 14px',
+                  borderRadius: 10,
+                  border: '1px solid #475569',
+                  background: '#1e293b',
+                  color: '#f1f5f9',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                ↻ 90°
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={onClose}

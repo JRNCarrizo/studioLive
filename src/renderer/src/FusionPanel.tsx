@@ -1,13 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { useCameraAliases } from './cameraAliases'
 import { FloatingEqualizerPanel } from './FloatingEqualizerPanel'
 import {
   btnAudio,
   btnNeutral,
-  pathLineMuted,
-  pathTextBright,
-  warnLineNoFolder,
   workspaceEyebrow,
   workspaceInnerCard
 } from './workspaceChrome'
@@ -18,6 +15,68 @@ import {
   type ParsedRecordingName
 } from './recordingFileNames'
 import { useFusionAudioGraph } from './useFusionAudioGraph'
+import { FusionProgramBackgroundTools } from './FusionProgramBackgroundTools'
+import { FusionProgramTools } from './FusionProgramTools'
+import { drawProgramBackground, resetProgramCanvas } from './programBackground'
+import { useProgramBackground } from './useProgramBackground'
+import { FusionSceneSwitcher } from './FusionSceneSwitcher'
+import { FusionCameraPlanBar } from './FusionCameraPlanBar'
+import {
+  cameraAtFusionTime,
+  fusionCameraColorMap,
+  fusionSegmentColor,
+  type FusionTimelineSegment
+} from './fusionCameraPlan'
+import { FusionStudioTransport } from './FusionStudioTransport'
+import { GLYPH } from './uiGlyphs'
+import { ProgramCropOverlay } from './ProgramCropOverlay'
+import { ProgramLayoutEditorOverlay } from './ProgramLayoutEditorOverlay'
+import {
+  clampCrop,
+  CROP_FULL,
+  cropIsFull,
+  drawCroppedFramedVideoInRect,
+  clientToCropNormalized,
+  panFramingByCssDeltaWithCrop,
+  type CamCrop
+} from './programCrop'
+import {
+  clampFraming,
+  FRAMING_LERP_K,
+  FRAMING_NEUTRAL,
+  lerpFraming,
+  type CamFraming
+} from './programFraming'
+import { getVideoFrameSize } from './videoFrameSize'
+import { useProgramFramingGestures } from './useProgramFramingGestures'
+import {
+  buildDefaultLayoutAssignments,
+  CANVAS_DIMS,
+  aspectToOrientation,
+  defaultEditableSlotIndex,
+  getLayout,
+  ORIENTATION_LABEL,
+  clampNormalizedSlotRect,
+  presetLayoutGeometry,
+  isLayoutEdgeCropGeometry,
+  slotVideoCoverAlign,
+  videoAlignForEdgeCropHandle,
+  unionNormalizedSlotRects,
+  VIDEO_ALIGN_CENTER,
+  PROGRAM_LAYOUTS,
+  reconcileLayoutAssignments,
+  resolveLayoutSlotRects,
+  sceneSignature,
+  parseSceneSignature,
+  type LayoutAssignments,
+  type LayoutEdgeCropHandle,
+  type LayoutEdgeCropHandleMap,
+  type LayoutGeometryMap,
+  type LayoutId,
+  type NormalizedSlotRect,
+  type ProgramOrientation,
+  type SlotRect
+} from './programScenes'
 
 type VideoClip = {
   cameraId: string
@@ -57,61 +116,6 @@ function sanitizeFusionSaveFileName(raw: string, fallback: string): string {
 function sanitizeFusionMp4FileName(raw: string, fallbackMp4: string): string {
   const fallbackWebm = fallbackMp4.replace(/\.mp4$/i, '.webm')
   return sanitizeFusionSaveFileName(raw, fallbackWebm).replace(/\.webm$/i, '.mp4')
-}
-
-/** Colores bien separados en el espectro; el índice corresponde al orden estable de cámaras en la sesión. */
-const FUSION_CAMERA_PALETTE = [
-  'hsl(204 72% 46%)',
-  'hsl(36 88% 48%)',
-  'hsl(142 58% 40%)',
-  'hsl(278 58% 54%)',
-  'hsl(168 55% 42%)',
-  'hsl(12 78% 52%)',
-  'hsl(48 85% 46%)',
-  'hsl(310 62% 52%)'
-] as const
-
-function fusionCameraColorMap(cameraIds: Iterable<string>): Map<string, string> {
-  const sorted = [...new Set(cameraIds)].sort((a, b) => a.localeCompare(b))
-  const map = new Map<string, string>()
-  sorted.forEach((id, i) => {
-    map.set(id, FUSION_CAMERA_PALETTE[i % FUSION_CAMERA_PALETTE.length]!)
-  })
-  return map
-}
-
-function fusionSegmentColor(map: Map<string, string>, cameraId: string): string {
-  const fromPalette = map.get(cameraId)
-  if (fromPalette) return fromPalette
-  let h = 0
-  for (let i = 0; i < cameraId.length; i++) {
-    h = (Math.imul(h, 31) + cameraId.charCodeAt(i)) >>> 0
-  }
-  return `hsl(${h % 360} 58% 42%)`
-}
-
-/** Alias por si queda alguna referencia antigua o caché de HMR a `cameraStripColor` (mismo fallback hash). */
-function cameraStripColor(cameraId: string): string {
-  return fusionSegmentColor(new Map(), cameraId)
-}
-
-/** Qué cámara iba al programa en el tiempo `t` según el EDL ya cerrado. */
-function cameraAtFusionTime(
-  t: number,
-  segments: readonly { startSec: number; endSec: number; cameraId: string }[]
-): string | null {
-  if (!segments.length) return null
-  const sorted = [...segments].sort((a, b) => a.startSec - b.startSec)
-  for (let i = 0; i < sorted.length; i++) {
-    const s = sorted[i]!
-    const last = i === sorted.length - 1
-    if (last) {
-      if (t >= s.startSec && t <= s.endSec + 1e-3) return s.cameraId
-    } else if (t >= s.startSec && t < s.endSec) {
-      return s.cameraId
-    }
-  }
-  return null
 }
 
 /**
@@ -161,12 +165,12 @@ type FusionPanelProps = {
   outputDir: string | null
   liveRecording: boolean
   onStatus: (msg: string) => void
-  /** Abre el diálogo de carpeta (misma carpeta que el paso 1). Opcional por compatibilidad. */
-  onPickOutputDir?: () => void | Promise<void>
 }
 
-export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDir }: FusionPanelProps) {
+export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelProps) {
   const cameraAliases = useCameraAliases()
+  const { background: programBackground, backgroundRef: programBackgroundRef, setBackground: setProgramBackground } =
+    useProgramBackground()
   const [clips, setClips] = useState<VideoClip[]>([])
   const [audioUrl, setAudioUrl] = useState<string | null>(null)
   const [sessionId, setSessionId] = useState<number | null>(null)
@@ -176,8 +180,31 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
   /** Refs para que el rAF del dibujo lea los valores actuales sin reabrir el efecto. */
   const crossfadeMsRef = useRef(programCrossfadeMs)
   const programFadeRef = useRef<ProgramFade | null>(null)
-  /** Última cámara que “asentó” en el canvas (al terminar fade o al setear sin fade). */
-  const settledProgramIdRef = useRef<string | null>(null)
+  /** Firma de escena asentada (crossfade entre layouts / composiciones). */
+  const settledSceneSigRef = useRef<string | null>(null)
+  const [programLayoutId, setProgramLayoutId] = useState<LayoutId>('single')
+  const [programSlots, setProgramSlots] = useState<(string | null)[]>([null])
+  const [layoutAssignments, setLayoutAssignments] = useState<LayoutAssignments>(() =>
+    buildDefaultLayoutAssignments([])
+  )
+  const [layoutGeometry, setLayoutGeometry] = useState<LayoutGeometryMap>({})
+  const layoutGeometryRef = useRef<LayoutGeometryMap>({})
+  const [layoutGeometryCeiling, setLayoutGeometryCeiling] = useState<LayoutGeometryMap>({})
+  const layoutGeometryCeilingRef = useRef<LayoutGeometryMap>({})
+  const [layoutGeometryTick, setLayoutGeometryTick] = useState(0)
+  const layoutEdgeCropHandleRef = useRef<LayoutEdgeCropHandleMap>({})
+  const activeLayoutEdgeCropRef = useRef<{
+    slotIndex: number
+    handle: LayoutEdgeCropHandle
+  } | null>(null)
+  const [selectedLayoutSlot, setSelectedLayoutSlot] = useState(0)
+  const [editingLayoutId, setEditingLayoutId] = useState<LayoutId>('single')
+  const [orientationSuggestionDismissed, setOrientationSuggestionDismissed] = useState(false)
+  const [configPopoverOpen, setConfigPopoverOpen] = useState(false)
+  const [cameraAspects, setCameraAspects] = useState<Record<string, { w: number; h: number }>>({})
+  const programLayoutIdRef = useRef<LayoutId>('single')
+  const programSlotsRef = useRef<(string | null)[]>([null])
+  const cameraIdsRef = useRef<string[]>([])
   useEffect(() => {
     crossfadeMsRef.current = programCrossfadeMs
   }, [programCrossfadeMs])
@@ -185,8 +212,8 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
   const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [fusionRecording, setFusionRecording] = useState(false)
-  /** Miniaturas en vivo vs solo botones con nombre (menos decoders). */
-  const [selectorMode, setSelectorMode] = useState<'thumbnails' | 'compact'>('thumbnails')
+  /** Vista de fuentes: miniaturas al costado del programa (como Fusión en vivo). */
+  const selectorMode = 'thumbnails' as const
   /** Tramos ya cerrados (EDL) durante / después de grabar fusión. */
   const [fusionSegmentsDone, setFusionSegmentsDone] = useState<
     { startSec: number; endSec: number; cameraId: string }[]
@@ -199,13 +226,44 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
   const [eqOpen, setEqOpen] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  /**
-   * Encuadre por cámara (zoom 1×–4× + offset normalizado del centro: 0..1).
-   * El destino se actualiza con mouse, el actual se interpola en el rAF (suavizado breve).
-   * `offsetX/Y = 0.5` significa centro de la imagen. Se clampa para que la ventana visible quede dentro.
-   */
-  type CamFraming = { zoom: number; offsetX: number; offsetY: number }
-  const FRAMING_NEUTRAL: CamFraming = { zoom: 1, offsetX: 0.5, offsetY: 0.5 }
+  const [programOrientation, setProgramOrientation] = useState<ProgramOrientation>('landscape')
+  const [cropEditOpen, setCropEditOpen] = useState(false)
+  const cropEditOpenRef = useRef(false)
+  useEffect(() => {
+    cropEditOpenRef.current = cropEditOpen
+  }, [cropEditOpen])
+  useEffect(() => {
+    programLayoutIdRef.current = programLayoutId
+  }, [programLayoutId])
+  useEffect(() => {
+    programSlotsRef.current = programSlots
+  }, [programSlots])
+  useEffect(() => {
+    layoutGeometryRef.current = layoutGeometry
+  }, [layoutGeometry])
+  useEffect(() => {
+    layoutGeometryCeilingRef.current = layoutGeometryCeiling
+  }, [layoutGeometryCeiling])
+
+  const applySlotEdgeCropHandle = useCallback(
+    (layoutId: LayoutId, slotIndex: number, handle: LayoutEdgeCropHandle | null) => {
+      if (handle) {
+        activeLayoutEdgeCropRef.current = { slotIndex, handle }
+      } else if (activeLayoutEdgeCropRef.current?.slotIndex === slotIndex) {
+        activeLayoutEdgeCropRef.current = null
+      }
+      const n = getLayout(layoutId).slotsCount
+      const base = [...(layoutEdgeCropHandleRef.current[layoutId] ?? [])]
+      while (base.length < n) base.push(null)
+      base[slotIndex] = handle
+      layoutEdgeCropHandleRef.current = { ...layoutEdgeCropHandleRef.current, [layoutId]: base }
+    },
+    []
+  )
+
+  const cropTargetRef = useRef<Map<string, CamCrop>>(new Map())
+  const [cropTick, setCropTick] = useState(0)
+  const [manualRotateDeg, setManualRotateDeg] = useState<Record<string, number>>({})
   const framingTargetRef = useRef<Map<string, CamFraming>>(new Map())
   const framingCurrentRef = useRef<Map<string, CamFraming>>(new Map())
   const [framingTick, setFramingTick] = useState(0)
@@ -229,7 +287,6 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
   const fusionPreviewBlobRef = useRef<Blob | null>(null)
   const fusionPreviewMimeRef = useRef<string | undefined>(undefined)
   const fusionPreviewUrlUnmountRef = useRef<string | null>(null)
-  const timelineBarRef = useRef<HTMLDivElement>(null)
   const [fusionPreviewUrl, setFusionPreviewUrl] = useState<string | null>(null)
   const [fusionPreviewIsFullscreen, setFusionPreviewIsFullscreen] = useState(false)
   /** Si la Fullscreen API falla (p. ej. Electron), cubrir el viewport con CSS. */
@@ -241,7 +298,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
   const [fusionExportBusy, setFusionExportBusy] = useState(false)
   /** Cuál botón está exportando (para spinner localizado y banner con detalle). */
   const [fusionExportTarget, setFusionExportTarget] = useState<'webm' | 'mp4' | null>(null)
-  /** Inicio del export en ms — para mostrar “tiempo transcurrido” mientras dura la operación. */
+  /** Inicio del export en ms — para mostrar tiempo transcurrido mientras dura la operación. */
   const [fusionExportStartMs, setFusionExportStartMs] = useState<number | null>(null)
   const [fusionExportElapsed, setFusionExportElapsed] = useState(0)
 
@@ -270,7 +327,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
   }, [])
 
   /**
-   * Cadena Web Audio para el audio de fusión: <audio> → EQ → (parlantes + grabador).
+   * Cadena Web Audio para el audio de fusión: audio → EQ → parlantes + grabador.
    * El graph se monta una sola vez por elemento, y queda en bypass por defecto si no tocás nada.
    * Necesito el `<audio>` como estado para que el hook reaccione a montaje/desmontaje (un ref no dispara render).
    */
@@ -340,6 +397,14 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
     }
   }, [])
 
+  const handleCameraAspect = useCallback((id: string, w: number, h: number) => {
+    setCameraAspects((prev) => {
+      const cur = prev[id]
+      if (cur && cur.w === w && cur.h === h) return prev
+      return { ...prev, [id]: { w, h } }
+    })
+  }, [])
+
   const refreshDuration = useCallback(() => {
     const ds: number[] = []
     for (const v of videoRefs.current.values()) {
@@ -355,6 +420,15 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
     if (ds.length) setDuration(Math.min(...ds))
   }, [])
 
+  const reportVideoAspect = useCallback(
+    (cameraId: string, el: HTMLVideoElement) => {
+      refreshDuration()
+      const { vw, vh } = getVideoFrameSize(el)
+      if (vw && vh) handleCameraAspect(cameraId, vw, vh)
+    },
+    [handleCameraAspect, refreshDuration]
+  )
+
   const getMasterTime = useCallback(() => {
     const master =
       audioUrl && audioRef.current
@@ -365,43 +439,158 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
     return master?.currentTime ?? 0
   }, [audioUrl, clips])
 
+  /** Tiempo 0…N dentro de la toma de fusión (no la línea maestra de las pistas). */
+  const getFusionPlanTimeSec = useCallback(() => {
+    return Math.max(0, getMasterTime() - fusionRecordStartSecRef.current)
+  }, [getMasterTime])
+
+  const applyProgramScene = useCallback((nextLayoutId: LayoutId, nextSlots: (string | null)[]) => {
+    const layout = getLayout(nextLayoutId)
+    const slots = nextSlots.slice(0, layout.slotsCount)
+    while (slots.length < layout.slotsCount) slots.push(null)
+    setProgramLayoutId(nextLayoutId)
+    setProgramSlots(slots)
+    if (nextLayoutId === 'single' && slots[0]) {
+      setProgramCameraId(slots[0])
+    }
+  }, [])
+
+  const ensureLayoutGeometry = useCallback(
+    (layoutId: LayoutId) => {
+      const dim = CANVAS_DIMS[programOrientation]
+      const preset = presetLayoutGeometry(layoutId, dim.w, dim.h)
+      setLayoutGeometry((prev) => {
+        const cur = prev[layoutId]
+        const n = getLayout(layoutId).slotsCount
+        if (cur?.length === n) return prev
+        return { ...prev, [layoutId]: preset }
+      })
+      setLayoutGeometryCeiling((prev) => {
+        const cur = prev[layoutId]
+        const n = getLayout(layoutId).slotsCount
+        if (cur?.length === n) return prev
+        return { ...prev, [layoutId]: preset.map((r) => ({ ...r })) }
+      })
+      setLayoutGeometryTick((t) => t + 1)
+    },
+    [programOrientation]
+  )
+
+  const sendLayoutToProgram = useCallback(
+    (layoutId: LayoutId) => {
+      const layout = getLayout(layoutId)
+      const saved = layoutAssignments[layoutId] ?? []
+      const ids = cameraIdsRef.current
+      const slots: (string | null)[] = []
+      const used = new Set<string>()
+      for (let i = 0; i < layout.slotsCount; i++) {
+        const wanted = saved[i] ?? null
+        if (wanted && ids.includes(wanted)) {
+          slots.push(wanted)
+          used.add(wanted)
+          continue
+        }
+        const pick = ids.find((cid) => !used.has(cid)) ?? ids[0] ?? null
+        if (pick) used.add(pick)
+        slots.push(pick)
+      }
+      applyProgramScene(layoutId, slots)
+      if (layoutId !== 'single') {
+        ensureLayoutGeometry(layoutId)
+        setSelectedLayoutSlot(defaultEditableSlotIndex(layoutId))
+      }
+    },
+    [applyProgramScene, ensureLayoutGeometry, layoutAssignments]
+  )
+
+  const setSlotForLayout = useCallback(
+    (layoutId: LayoutId, slotIdx: number, cameraId: string | null) => {
+      setLayoutAssignments((prev) => {
+        const cur = prev[layoutId] ?? []
+        if (cur[slotIdx] === cameraId) return prev
+        const next = cur.slice()
+        next[slotIdx] = cameraId
+        return { ...prev, [layoutId]: next }
+      })
+      if (programLayoutIdRef.current === layoutId) {
+        const live = programSlotsRef.current.slice()
+        if (live[slotIdx] !== cameraId) {
+          live[slotIdx] = cameraId
+          applyProgramScene(layoutId, live)
+        }
+      }
+    },
+    [applyProgramScene]
+  )
+
   const pickProgramCamera = useCallback(
     (id: string) => {
-      if (fusionRecording && openFusionSeg && id !== programCameraId) {
-        const t = getMasterTime()
+      setLayoutAssignments((p) => ({ ...p, single: [id] }))
+      applyProgramScene('single', [id])
+    },
+    [applyProgramScene]
+  )
+
+  const fusionPlanAirId =
+    programLayoutId === 'single' ? programCameraId : (programSlots[0] ?? null)
+
+  useEffect(() => {
+    if (!fusionRecording) return
+    const air = fusionPlanAirId
+    const t = getFusionPlanTimeSec()
+    setOpenFusionSeg((open) => {
+      if (open?.cameraId === air) return open
+      if (open) {
         setFusionSegmentsDone((prev) => [
           ...prev,
-          { startSec: openFusionSeg.startSec, endSec: t, cameraId: openFusionSeg.cameraId }
+          { startSec: open.startSec, endSec: t, cameraId: open.cameraId }
         ])
-        setOpenFusionSeg({ cameraId: id, startSec: t })
       }
-      setProgramCameraId(id)
+      return air ? { cameraId: air, startSec: t } : null
+    })
+  }, [fusionPlanAirId, fusionRecording, getFusionPlanTimeSec])
+
+  const assignCameraToProgram = useCallback(
+    (cameraId: string) => {
+      if (programLayoutId !== 'single') {
+        setSlotForLayout(programLayoutId, selectedLayoutSlot, cameraId)
+        return
+      }
+      pickProgramCamera(cameraId)
     },
-    [fusionRecording, openFusionSeg, programCameraId, getMasterTime]
+    [pickProgramCamera, programLayoutId, selectedLayoutSlot, setSlotForLayout]
   )
+
+  const fusionPlanTimeSec = useMemo(() => {
+    if (fusionRecording) return getFusionPlanTimeSec()
+    let max = 0
+    for (const s of fusionSegmentsDone) max = Math.max(max, s.endSec)
+    return max
+  }, [fusionRecording, fusionSegmentsDone, currentTime, getFusionPlanTimeSec])
 
   const timelineSegments = useMemo(() => {
     const out = [...fusionSegmentsDone]
     if (fusionRecording && openFusionSeg) {
       out.push({
         startSec: openFusionSeg.startSec,
-        endSec: currentTime,
+        endSec: fusionPlanTimeSec,
         cameraId: openFusionSeg.cameraId
       })
     }
     return out
-  }, [fusionSegmentsDone, fusionRecording, openFusionSeg, currentTime])
+  }, [fusionSegmentsDone, fusionRecording, openFusionSeg, fusionPlanTimeSec])
 
-  /** Escala horizontal del timeline: no ocultar la barra si metadata aún no dio duración. */
   const timelineScaleDuration = useMemo(() => {
-    let max = Number.isFinite(duration) && duration > 0 ? duration : 0
-    for (const s of timelineSegments) {
-      if (Number.isFinite(s.endSec)) max = Math.max(max, s.endSec)
-      if (Number.isFinite(s.startSec)) max = Math.max(max, s.startSec)
+    if (fusionRecording || fusionSegmentsDone.length > 0) {
+      let max = fusionPlanTimeSec
+      for (const s of timelineSegments) {
+        max = Math.max(max, s.endSec, s.startSec)
+      }
+      return Math.max(max, 0.5)
     }
-    if (Number.isFinite(currentTime)) max = Math.max(max, currentTime)
-    return max > 0 ? max : 1
-  }, [currentTime, duration, timelineSegments])
+    const d = Number.isFinite(duration) && duration > 0 ? duration : 0
+    return d > 0 ? d : 1
+  }, [duration, fusionPlanTimeSec, fusionRecording, fusionSegmentsDone.length, timelineSegments])
 
   const fusionCameraColors = useMemo(() => {
     const ids = new Set<string>()
@@ -410,6 +599,69 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
     if (openFusionSeg) ids.add(openFusionSeg.cameraId)
     return fusionCameraColorMap(ids)
   }, [clips, fusionSegmentsDone, openFusionSeg])
+
+  const cameraIds = useMemo(() => clips.map((c) => c.cameraId), [clips])
+
+  const currentSceneSig = useMemo(
+    () => sceneSignature({ layoutId: programLayoutId, slots: programSlots }),
+    [programLayoutId, programSlots]
+  )
+
+  const suggestedOrientation = useMemo<ProgramOrientation | null>(() => {
+    if (cameraIds.length === 0) return null
+    const orientations = new Set<ProgramOrientation>()
+    for (const id of cameraIds) {
+      const dim = cameraAspects[id]
+      if (!dim) return null
+      orientations.add(aspectToOrientation(dim.w, dim.h))
+    }
+    if (orientations.size !== 1) return null
+    const only = [...orientations][0]!
+    if (only === programOrientation) return null
+    return only
+  }, [cameraIds, cameraAspects, programOrientation])
+
+  useEffect(() => {
+    if (suggestedOrientation) setOrientationSuggestionDismissed(false)
+  }, [suggestedOrientation])
+
+  useEffect(() => {
+    if (!configPopoverOpen) return
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setConfigPopoverOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [configPopoverOpen])
+
+  useEffect(() => {
+    cameraIdsRef.current = cameraIds
+    setLayoutAssignments((prev) => reconcileLayoutAssignments(prev, cameraIds))
+    if (!cameraIds.length) {
+      setProgramSlots((prev) => prev.map(() => null))
+      return
+    }
+    setProgramSlots((prev) => {
+      const layout = getLayout(programLayoutIdRef.current)
+      const slots: (string | null)[] = []
+      const used = new Set<string>()
+      let changed = false
+      for (let i = 0; i < layout.slotsCount; i++) {
+        const want = prev[i] ?? null
+        if (want && cameraIds.includes(want) && !used.has(want)) {
+          slots.push(want)
+          used.add(want)
+          continue
+        }
+        const pick = cameraIds.find((cid) => !used.has(cid)) ?? cameraIds[0] ?? null
+        if (pick) used.add(pick)
+        slots.push(pick)
+        if (pick !== want) changed = true
+      }
+      if (!changed && slots.length === prev.length && slots.every((s, i) => s === prev[i])) return prev
+      return slots
+    })
+  }, [cameraIds])
 
   /** Al cargar WebM, la duración a veces llega tarde; reintentos cortos + eventos extra en <video>. */
   useEffect(() => {
@@ -431,7 +683,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
       if (!info) {
         if (isFusionExportFileName(name)) {
           setLoadErr(
-            'Ese archivo es una fusión ya exportada (fusion-*.webm). Acá cargá las pistas del paso 1: los cam-*.webm de cada cámara y, si tenés, el audio-*.webm — no el archivo fusion.'
+            'Ese archivo es una fusión ya exportada (fusion-*.webm). Acá cargá las pistas del paso 1: los cam-*.webm de cada cámara y, si tenés, el audio-*.webm � no el archivo fusion.'
           )
         } else {
           setLoadErr(`Archivo no reconocido (usá cam-* o audio-* de esta app): ${name}`)
@@ -484,7 +736,11 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
     setSessionId(sid)
     setClips(cams)
     setAudioUrl(audioU)
-    setProgramCameraId(cams[0]!.cameraId)
+    const camIds = cams.map((c) => c.cameraId)
+    setLayoutAssignments(buildDefaultLayoutAssignments(camIds))
+    setProgramLayoutId('single')
+    setProgramSlots([camIds[0] ?? null])
+    setProgramCameraId(camIds[0]!)
     setPlaying(false)
     setCurrentTime(0)
     setDuration(0)
@@ -516,9 +772,9 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
         if (v && !v.ended && Math.abs(v.currentTime - t) > 0.25) v.currentTime = t
         const th = thumbVideoRefs.current.get(c.cameraId)
         if (th) {
-          /** Miniatura: umbral más holgado que la ISO grande (menos “temblor” por jitter del decodificador). */
+          /** Miniatura: umbral más holgado que la ISO grande (menos �Stemblor⬝ por jitter del decodificador). */
           if (!th.ended && Math.abs(th.currentTime - t) > 0.38) th.currentTime = t
-          /** `play()` con `ended` rebobina al inicio → loop con el seek al final del maestro. */
+          /** `play()` con `ended` rebobina al inicio �  loop con el seek al final del maestro. */
           if (th.paused && !th.ended) void th.play().catch(() => {})
         }
       }
@@ -555,134 +811,235 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
     }
   }, [fusionPreviewUrl, selectorMode, playing, clips, audioUrl])
 
-  /** Programa el fundido cuando cambia la cámara del programa; si hay uno en curso, sale desde su destino. */
+  /** Fundido al cambiar escena (cámara o layout multi-slot). */
   useLayoutEffect(() => {
-    if (!programCameraId) {
-      settledProgramIdRef.current = null
+    const targetSig = currentSceneSig
+    if (!targetSig) {
+      settledSceneSigRef.current = null
       programFadeRef.current = null
       return
     }
 
     if (crossfadeMsRef.current <= 0) {
-      settledProgramIdRef.current = programCameraId
+      settledSceneSigRef.current = targetSig
       programFadeRef.current = null
       return
     }
 
     const mid = programFadeRef.current
-    const sourceFrom = mid && mid.to !== programCameraId ? mid.to : settledProgramIdRef.current
+    const sourceFrom = mid && mid.to !== targetSig ? mid.to : settledSceneSigRef.current
 
-    if (sourceFrom === programCameraId) {
-      if (!mid) settledProgramIdRef.current = programCameraId
+    if (sourceFrom === targetSig) {
+      if (!mid) settledSceneSigRef.current = targetSig
       return
     }
 
     if (sourceFrom == null) {
-      settledProgramIdRef.current = programCameraId
+      settledSceneSigRef.current = targetSig
       programFadeRef.current = null
       return
     }
 
-    const vFrom = videoRefs.current.get(sourceFrom)
-    const vTo = videoRefs.current.get(programCameraId)
-    if (!vFrom || !vTo) {
-      settledProgramIdRef.current = programCameraId
-      programFadeRef.current = null
-      return
-    }
-
-    programFadeRef.current = { from: sourceFrom, to: programCameraId, start: performance.now() }
-  }, [programCameraId, programCrossfadeMs])
+    programFadeRef.current = { from: sourceFrom, to: targetSig, start: performance.now() }
+  }, [currentSceneSig, programCrossfadeMs])
 
   /**
-   * Dibujo programa → canvas.
-   * Aplica encuadre virtual (zoom + pan) por cámara con interpolación suave (lerp),
-   * y cuando hay fundido entre tomas, mezcla `from`/`to` con `globalAlpha` (smoothstep).
+   * Dibujo programa �  canvas (layouts multi-slot + recorte/zoom como Fusión en vivo).
    */
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas || !programCameraId) return
+    if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const lerp = (a: number, b: number, k: number) => a + (b - a) * k
+    const off = document.createElement('canvas')
+    const offCtx = off.getContext('2d')
+    if (!offCtx) return
 
-    const drawCamera = (cameraId: string, alpha: number) => {
+    let cancelled = false
+    let rafId = 0
+
+    const drawVideoInRect = (
+      target: CanvasRenderingContext2D,
+      cameraId: string,
+      rect: SlotRect,
+      slotNorm?: NormalizedSlotRect,
+      ceilingNorm?: NormalizedSlotRect,
+      canvasW?: number,
+      canvasH?: number,
+      slotIndex?: number
+    ) => {
       const v = videoRefs.current.get(cameraId)
       if (!v || v.readyState < 1) return
-      const vw = v.videoWidth
-      const vh = v.videoHeight
-      if (!vw || !vh) return
-      const target = framingTargetRef.current.get(cameraId) ?? FRAMING_NEUTRAL
-      const cur = framingCurrentRef.current.get(cameraId) ?? FRAMING_NEUTRAL
-      /** 0.22 → llega al destino en ~70–100 ms a 60 Hz; suficiente para no verse "snap". */
-      const k = 0.22
-      const next: CamFraming = {
-        zoom: lerp(cur.zoom, target.zoom, k),
-        offsetX: lerp(cur.offsetX, target.offsetX, k),
-        offsetY: lerp(cur.offsetY, target.offsetY, k)
-      }
-      framingCurrentRef.current.set(cameraId, next)
-      const cw = canvas.width
-      const ch = canvas.height
-      const fit = Math.min(cw / vw, ch / vh)
-      const dw = vw * fit
-      const dh = vh * fit
-      const ox = (cw - dw) / 2
-      const oy = (ch - dh) / 2
-      const z = Math.max(1, Math.min(4, next.zoom))
-      const srcW = vw / z
-      const srcH = vh / z
-      const halfW = srcW / 2
-      const halfH = srcH / 2
-      const cx = Math.min(vw - halfW, Math.max(halfW, next.offsetX * vw))
-      const cy = Math.min(vh - halfH, Math.max(halfH, next.offsetY * vh))
-      const sx = cx - halfW
-      const sy = cy - halfH
+      target.save()
       try {
-        ctx.globalAlpha = alpha
-        ctx.drawImage(v, sx, sy, srcW, srcH, ox, oy, dw, dh)
+        const cw = rect.w
+        const ch = rect.h
+        target.beginPath()
+        target.rect(rect.x, rect.y, cw, ch)
+        target.clip()
+        /** No pintar negro: el lienzo ya trae fondo (`drawProgramBackground`); así se ven bandas/meta en ´contain´ */
+        const rot = manualRotateDeg[cameraId] ?? 0
+        const { vw, vh } = getVideoFrameSize(v)
+        if (!vw || !vh) return
+        const layoutId = programLayoutIdRef.current
+        let slotFit: 'contain' | 'cover' = 'contain'
+        let slotAlign = VIDEO_ALIGN_CENTER
+        let coverScaleRect: SlotRect | undefined
+        if (layoutId !== 'single' && slotNorm && canvasW != null && canvasH != null) {
+          slotFit = 'cover'
+          const ceil = clampNormalizedSlotRect(ceilingNorm ?? slotNorm)
+          const activeEdge =
+            slotIndex != null && activeLayoutEdgeCropRef.current?.slotIndex === slotIndex
+              ? activeLayoutEdgeCropRef.current.handle
+              : null
+          const storedEdge =
+            slotIndex != null ? layoutEdgeCropHandleRef.current[layoutId]?.[slotIndex] ?? null : null
+          const edgeHandle = activeEdge ?? storedEdge
+          const edgeCrop = edgeHandle != null || isLayoutEdgeCropGeometry(slotNorm, ceil)
+          if (edgeCrop) {
+            slotAlign = edgeHandle
+              ? videoAlignForEdgeCropHandle(edgeHandle)
+              : slotVideoCoverAlign(slotNorm, ceil)
+            coverScaleRect = {
+              x: Math.round(ceil.x * canvasW),
+              y: Math.round(ceil.y * canvasH),
+              w: Math.max(1, Math.round(ceil.w * canvasW)),
+              h: Math.max(1, Math.round(ceil.h * canvasH))
+            }
+          } else {
+            slotAlign = VIDEO_ALIGN_CENTER
+          }
+        }
+        const cropEditing =
+          cropEditOpenRef.current &&
+          programLayoutIdRef.current === 'single' &&
+          programSlotsRef.current[0] === cameraId
+        if (cropEditing) {
+          drawCroppedFramedVideoInRect(
+            target,
+            v,
+            rect,
+            CROP_FULL,
+            FRAMING_NEUTRAL,
+            rot,
+            1,
+            slotFit,
+            slotAlign,
+            coverScaleRect,
+            vw,
+            vh
+          )
+        } else {
+          const crop = cropTargetRef.current.get(cameraId) ?? CROP_FULL
+          const tgt = framingTargetRef.current.get(cameraId) ?? FRAMING_NEUTRAL
+          const cur = framingCurrentRef.current.get(cameraId) ?? FRAMING_NEUTRAL
+          const next = lerpFraming(cur, tgt, FRAMING_LERP_K)
+          framingCurrentRef.current.set(cameraId, next)
+          drawCroppedFramedVideoInRect(
+            target,
+            v,
+            rect,
+            crop,
+            next,
+            rot,
+            1,
+            slotFit,
+            slotAlign,
+            coverScaleRect,
+            vw,
+            vh
+          )
+        }
       } catch {
-        /* fotograma aún no decodificado */
+        /* frame no listo */
       } finally {
-        ctx.globalAlpha = 1
+        target.restore()
       }
     }
 
-    const draw = () => {
+    const renderSceneInto = (target: CanvasRenderingContext2D, sig: string, cw: number, ch: number) => {
+      resetProgramCanvas(target, cw, ch)
+      drawProgramBackground({
+        ctx: target,
+        cw,
+        ch,
+        background: programBackgroundRef.current,
+        getVideo: (id) => videoRefs.current.get(id),
+        getRotateDeg: (id) => manualRotateDeg[id] ?? 0
+      })
+      const sc = parseSceneSignature(sig)
+      const rects = resolveLayoutSlotRects(sc.layoutId, cw, ch, layoutGeometryRef.current[sc.layoutId])
+      const geomNorm = layoutGeometryRef.current[sc.layoutId]
+      const ceilNorm = layoutGeometryCeilingRef.current[sc.layoutId]
+      for (let i = 0; i < rects.length; i++) {
+        const id = sc.slots[i] ?? null
+        if (!id) continue
+        drawVideoInRect(
+          target,
+          id,
+          rects[i]!,
+          geomNorm?.[i],
+          ceilNorm?.[i] ?? geomNorm?.[i],
+          cw,
+          ch,
+          i
+        )
+      }
+    }
+
+    const drawOnce = () => {
       const cw = canvas.width
       const ch = canvas.height
-      ctx.fillStyle = '#020617'
-      ctx.fillRect(0, 0, cw, ch)
-
+      const targetSig = sceneSignature({
+        layoutId: programLayoutIdRef.current,
+        slots: programSlotsRef.current
+      })
       const fade = programFadeRef.current
       const ms = crossfadeMsRef.current
 
-      if (!fade || ms <= 0) {
-        drawCamera(programCameraId, 1)
-        rafRef.current = requestAnimationFrame(draw)
+      if (!fade || ms <= 0 || !targetSig) {
+        renderSceneInto(ctx, targetSig, cw, ch)
         return
       }
 
       const elapsed = performance.now() - fade.start
       if (elapsed >= ms) {
         programFadeRef.current = null
-        settledProgramIdRef.current = fade.to
-        drawCamera(fade.to, 1)
-        rafRef.current = requestAnimationFrame(draw)
+        settledSceneSigRef.current = fade.to
+        renderSceneInto(ctx, fade.to, cw, ch)
         return
       }
 
+      if (off.width !== cw) off.width = cw
+      if (off.height !== ch) off.height = ch
+
       const tLin = Math.min(1, elapsed / ms)
-      /** Smoothstep: arranca y termina suave (más “cinematográfico” que lineal). */
       const t = tLin * tLin * (3 - 2 * tLin)
-      drawCamera(fade.from, 1 - t)
-      drawCamera(fade.to, t)
-      rafRef.current = requestAnimationFrame(draw)
+
+      renderSceneInto(ctx, fade.from, cw, ch)
+      renderSceneInto(offCtx, fade.to, cw, ch)
+      ctx.globalAlpha = t
+      ctx.drawImage(off, 0, 0)
+      ctx.globalAlpha = 1
     }
-    rafRef.current = requestAnimationFrame(draw)
-    return () => cancelAnimationFrame(rafRef.current)
-  }, [programCameraId, clips])
+
+    const scheduleNext = () => {
+      if (cancelled) return
+      rafId = requestAnimationFrame(() => {
+        if (cancelled) return
+        drawOnce()
+        scheduleNext()
+      })
+    }
+
+    scheduleNext()
+
+    return () => {
+      cancelled = true
+      cancelAnimationFrame(rafId)
+    }
+  }, [clips, manualRotateDeg, cropTick, programOrientation])
 
   /** Lee el encuadre destino actual de la cámara visible (para mostrar % y reset). */
   const programFramingTarget = useMemo<CamFraming>(() => {
@@ -692,140 +1049,149 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [programCameraId, framingTick])
 
+  const applyFraming = useCallback((cameraId: string, next: CamFraming) => {
+    const clamped = clampFraming(next)
+    framingTargetRef.current.set(cameraId, clamped)
+    framingCurrentRef.current.set(cameraId, clamped)
+    setFramingTick((n) => n + 1)
+  }, [])
+
   const updateFramingTarget = useCallback(
     (cameraId: string, mutator: (cur: CamFraming) => CamFraming) => {
       const cur = framingTargetRef.current.get(cameraId) ?? FRAMING_NEUTRAL
-      const next = mutator(cur)
-      const clamped: CamFraming = {
-        zoom: Math.max(1, Math.min(4, next.zoom)),
-        offsetX: Math.max(0, Math.min(1, next.offsetX)),
-        offsetY: Math.max(0, Math.min(1, next.offsetY))
-      }
-      framingTargetRef.current.set(cameraId, clamped)
-      setFramingTick((n) => n + 1)
+      applyFraming(cameraId, mutator(cur))
     },
-    []
+    [applyFraming]
   )
 
   const resetFraming = useCallback(
     (cameraId: string | null) => {
       if (!cameraId) return
-      framingTargetRef.current.set(cameraId, { ...FRAMING_NEUTRAL })
-      setFramingTick((n) => n + 1)
+      applyFraming(cameraId, { ...FRAMING_NEUTRAL })
     },
-    []
+    [applyFraming]
   )
 
-  /**
-   * Convierte (clientX, clientY) sobre el canvas en coords normalizadas (0..1) **del frame de video**,
-   * teniendo en cuenta el rect del DOM, el letterbox del canvas y el zoom/offset actual.
-   * Devuelve null si el punto cayó fuera del rect del video (en bandas negras).
-   */
-  const pointerToFrameNormalized = useCallback(
-    (clientX: number, clientY: number): { nx: number; ny: number } | null => {
-      const canvas = canvasRef.current
-      if (!canvas || !programCameraId) return null
-      const v = videoRefs.current.get(programCameraId)
-      if (!v) return null
-      const vw = v.videoWidth
-      const vh = v.videoHeight
-      if (!vw || !vh) return null
-      const rect = canvas.getBoundingClientRect()
-      const cssX = clientX - rect.left
-      const cssY = clientY - rect.top
-      const cw = canvas.width
-      const ch = canvas.height
-      /** Mapear CSS → coords internas del canvas (1280×720). */
-      const px = (cssX / rect.width) * cw
-      const py = (cssY / rect.height) * ch
-      const fit = Math.min(cw / vw, ch / vh)
-      const dw = vw * fit
-      const dh = vh * fit
-      const ox = (cw - dw) / 2
-      const oy = (ch - dh) / 2
-      if (px < ox || px > ox + dw || py < oy || py > oy + dh) return null
-      const cur = framingTargetRef.current.get(programCameraId) ?? FRAMING_NEUTRAL
-      const z = Math.max(1, Math.min(4, cur.zoom))
-      /** Posición dentro del rect dibujado (0..1). */
-      const u = (px - ox) / dw
-      const w = (py - oy) / dh
-      /** Tamaño visible del frame (en coords 0..1 del frame). */
-      const srcW01 = 1 / z
-      const srcH01 = 1 / z
-      const halfW01 = srcW01 / 2
-      const halfH01 = srcH01 / 2
-      const cxN = Math.min(1 - halfW01, Math.max(halfW01, cur.offsetX))
-      const cyN = Math.min(1 - halfH01, Math.max(halfH01, cur.offsetY))
-      const sx01 = cxN - halfW01
-      const sy01 = cyN - halfH01
-      return { nx: sx01 + u * srcW01, ny: sy01 + w * srcH01 }
+  const programCrop = useMemo<CamCrop>(() => {
+    if (!programCameraId) return CROP_FULL
+    return cropTargetRef.current.get(programCameraId) ?? CROP_FULL
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [programCameraId, cropTick])
+
+  const programRotateDeg = programCameraId ? (manualRotateDeg[programCameraId] ?? 0) : 0
+  const framingEditable = programLayoutId === 'single' && programCameraId != null
+  const layoutEditable = programLayoutId !== 'single'
+
+  const activeLayoutGeometry = useMemo((): NormalizedSlotRect[] => {
+    const dim = CANVAS_DIMS[programOrientation]
+    const stored = layoutGeometry[programLayoutId]
+    if (stored?.length === getLayout(programLayoutId).slotsCount) return stored
+    return presetLayoutGeometry(programLayoutId, dim.w, dim.h)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [programLayoutId, programOrientation, layoutGeometry, layoutGeometryTick])
+
+  const activeLayoutGeometryCeiling = useMemo((): NormalizedSlotRect[] => {
+    const dim = CANVAS_DIMS[programOrientation]
+    const stored = layoutGeometryCeiling[programLayoutId]
+    if (stored?.length === getLayout(programLayoutId).slotsCount) return stored
+    return presetLayoutGeometry(programLayoutId, dim.w, dim.h)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [programLayoutId, programOrientation, layoutGeometryCeiling, layoutGeometryTick])
+
+  const updateCrop = useCallback((cameraId: string, next: CamCrop) => {
+    cropTargetRef.current.set(cameraId, clampCrop(next))
+    setCropTick((n) => n + 1)
+  }, [])
+
+  const resetCrop = useCallback((cameraId: string | null) => {
+    if (!cameraId) return
+    cropTargetRef.current.set(cameraId, { ...CROP_FULL })
+    setCropTick((n) => n + 1)
+  }, [])
+
+  const toggleCropEdit = useCallback(() => {
+    const next = !cropEditOpenRef.current
+    cropEditOpenRef.current = next
+    setCropEditOpen(next)
+    if (programCameraId) {
+      const neutral = { ...FRAMING_NEUTRAL }
+      framingTargetRef.current.set(programCameraId, neutral)
+      framingCurrentRef.current.set(programCameraId, neutral)
+      setFramingTick((n) => n + 1)
+    }
+  }, [programCameraId])
+
+  const bumpRotate = useCallback((cameraId: string) => {
+    setManualRotateDeg((prev) => ({
+      ...prev,
+      [cameraId]: ((prev[cameraId] ?? 0) + 90) % 360
+    }))
+  }, [])
+
+  const removeClipFromSession = useCallback(
+    (cameraId: string) => {
+      setClips((prev) => {
+        const next = prev.filter((c) => c.cameraId !== cameraId)
+        if (programCameraId === cameraId) {
+          setProgramCameraId(next[0]?.cameraId ?? null)
+        }
+        return next
+      })
+      cropTargetRef.current.delete(cameraId)
+      framingTargetRef.current.delete(cameraId)
+      framingCurrentRef.current.delete(cameraId)
+      setManualRotateDeg((prev) => {
+        const n = { ...prev }
+        delete n[cameraId]
+        return n
+      })
     },
     [programCameraId]
   )
 
-  const onProgramWheel = useCallback(
-    (e: React.WheelEvent<HTMLCanvasElement>) => {
-      if (!programCameraId) return
-      e.preventDefault()
-      const ptr = pointerToFrameNormalized(e.clientX, e.clientY)
-      const cur = framingTargetRef.current.get(programCameraId) ?? FRAMING_NEUTRAL
-      /** Factor multiplicativo: scroll arriba acerca; mantiene sensación natural en trackpad/rueda. */
-      const factor = Math.exp(-e.deltaY * 0.0015)
-      const newZoom = Math.max(1, Math.min(4, cur.zoom * factor))
-      if (newZoom === cur.zoom) return
-      if (!ptr) {
-        updateFramingTarget(programCameraId, (c) => ({ ...c, zoom: newZoom }))
-        return
-      }
-      /**
-       * Zoom anclado al cursor: queremos que el píxel bajo el cursor (en coords del frame)
-       * se quede bajo el cursor. Si conocemos (nx, ny) del puntero antes del zoom y
-       * el cursor está a (u,w) en el rect dibujado, despejamos el nuevo offsetX/Y:
-       *   nx = (offsetX - 0.5/z') + u * (1/z')  →  offsetX = nx - u/z' + 0.5/z'
-       * usando u≈w del nuevo rect (mismas u,w que pre-zoom, porque el rect destino no cambia).
-       */
-      const canvas = canvasRef.current!
-      const v = videoRefs.current.get(programCameraId)!
-      const vw = v.videoWidth
-      const vh = v.videoHeight
-      const cw = canvas.width
-      const ch = canvas.height
-      const rect = canvas.getBoundingClientRect()
-      const cssX = e.clientX - rect.left
-      const cssY = e.clientY - rect.top
-      const px = (cssX / rect.width) * cw
-      const py = (cssY / rect.height) * ch
-      const fit = Math.min(cw / vw, ch / vh)
-      const dw = vw * fit
-      const dh = vh * fit
-      const ox = (cw - dw) / 2
-      const oy = (ch - dh) / 2
-      const u = Math.min(1, Math.max(0, (px - ox) / dw))
-      const w = Math.min(1, Math.max(0, (py - oy) / dh))
-      const newOffsetX = ptr.nx - u / newZoom + 0.5 / newZoom
-      const newOffsetY = ptr.ny - w / newZoom + 0.5 / newZoom
-      updateFramingTarget(programCameraId, () => ({
-        zoom: newZoom,
-        offsetX: newOffsetX,
-        offsetY: newOffsetY
-      }))
-    },
-    [pointerToFrameNormalized, programCameraId, updateFramingTarget]
-  )
+  useEffect(() => {
+    if (!programCameraId) return
+    const v = videoRefs.current.get(programCameraId)
+    if (!v?.videoWidth) return
+    const want = aspectToOrientation(v.videoWidth, v.videoHeight)
+    setProgramOrientation((cur) => (cur === want ? cur : want))
+  }, [programCameraId, clips])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const dim = CANVAS_DIMS[programOrientation]
+    if (canvas.width !== dim.w || canvas.height !== dim.h) {
+      canvas.width = dim.w
+      canvas.height = dim.h
+    }
+  }, [programOrientation])
+
+  useProgramFramingGestures({
+    enabled: framingEditable && !cropEditOpen,
+    cameraId: programCameraId,
+    canvasRef,
+    getVideo: (id) => videoRefs.current.get(id),
+    getCrop: (id) => cropTargetRef.current.get(id) ?? CROP_FULL,
+    getFraming: (id) => framingTargetRef.current.get(id) ?? FRAMING_NEUTRAL,
+    applyFraming,
+    rotateDeg: programRotateDeg,
+    programDragRef
+  })
 
   const onProgramMouseDown = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (!programCameraId) return
+      if (!programCameraId || cropEditOpen) return
       if (e.button !== 0) return
       programDragRef.current = { startX: e.clientX, startY: e.clientY, moved: false }
     },
-    [programCameraId]
+    [cropEditOpen, programCameraId]
   )
 
   const onProgramMouseMove = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       const drag = programDragRef.current
-      if (!drag || !programCameraId) return
+      if (!drag || !programCameraId || cropEditOpen) return
       const dx = e.clientX - drag.startX
       const dy = e.clientY - drag.startY
       if (!drag.moved && Math.hypot(dx, dy) < 3) return
@@ -833,30 +1199,22 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
       drag.startX = e.clientX
       drag.startY = e.clientY
       const canvas = canvasRef.current
-      if (!canvas) return
       const v = videoRefs.current.get(programCameraId)
-      if (!v) return
-      const vw = v.videoWidth
-      const vh = v.videoHeight
-      if (!vw || !vh) return
-      const rect = canvas.getBoundingClientRect()
-      const cw = canvas.width
-      const ch = canvas.height
-      const fit = Math.min(cw / vw, ch / vh)
-      const dw = vw * fit
-      const dh = vh * fit
-      /** dx en CSS → en frame normalizado: dividir por dw_css y luego por zoom. */
-      const cssDxRatio = dx / (rect.width * (dw / cw))
-      const cssDyRatio = dy / (rect.height * (dh / ch))
+      if (!canvas || !v) return
+      const crop = cropTargetRef.current.get(programCameraId) ?? CROP_FULL
       const cur = framingTargetRef.current.get(programCameraId) ?? FRAMING_NEUTRAL
-      const z = Math.max(1, Math.min(4, cur.zoom))
-      updateFramingTarget(programCameraId, (c) => ({
-        ...c,
-        offsetX: c.offsetX - cssDxRatio / z,
-        offsetY: c.offsetY - cssDyRatio / z
-      }))
+      const next = panFramingByCssDeltaWithCrop({
+        dx,
+        dy,
+        canvas,
+        video: v,
+        crop,
+        cur,
+        rotateDeg: programRotateDeg
+      })
+      applyFraming(programCameraId, next)
     },
-    [programCameraId, updateFramingTarget]
+    [applyFraming, cropEditOpen, programCameraId, programRotateDeg]
   )
 
   const onProgramMouseUp = useCallback(() => {
@@ -865,23 +1223,37 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
 
   const onProgramClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
-      /** Si el mouse arrastró (>3px), no es "clic puntual" → no centrar. */
       const drag = programDragRef.current
       if (drag?.moved) {
         programDragRef.current = null
         return
       }
-      if (!programCameraId) return
-      const ptr = pointerToFrameNormalized(e.clientX, e.clientY)
+      if (!programCameraId || cropEditOpen) return
+      const canvas = canvasRef.current
+      const v = videoRefs.current.get(programCameraId)
+      if (!canvas || !v) return
+      const crop = cropTargetRef.current.get(programCameraId) ?? CROP_FULL
+      const cur = framingTargetRef.current.get(programCameraId) ?? FRAMING_NEUTRAL
+      const ptr = clientToCropNormalized(
+        e.clientX,
+        e.clientY,
+        canvas,
+        v,
+        crop,
+        cur,
+        programRotateDeg
+      )
       if (!ptr) return
-      updateFramingTarget(programCameraId, (c) => ({ ...c, offsetX: ptr.nx, offsetY: ptr.ny }))
+      applyFraming(programCameraId, { ...cur, offsetX: ptr.nx, offsetY: ptr.ny })
     },
-    [pointerToFrameNormalized, programCameraId, updateFramingTarget]
+    [applyFraming, cropEditOpen, programCameraId, programRotateDeg]
   )
 
   const onProgramDoubleClick = useCallback(() => {
+    if (cropEditOpen) return
     resetFraming(programCameraId)
-  }, [programCameraId, resetFraming])
+  }, [cropEditOpen, programCameraId, resetFraming])
+
 
   const pauseAll = useCallback(() => {
     const master = audioUrl && audioRef.current ? audioRef.current : videoRefs.current.get(clips[0]!.cameraId)
@@ -975,7 +1347,8 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
       if (audioRef.current) audioRef.current.currentTime = x
       setCurrentTime(x)
       if (!fusionRecording && fusionSegmentsDone.length > 0) {
-        const cam = cameraAtFusionTime(x, fusionSegmentsDone)
+        const rel = Math.max(0, x - fusionRecordStartSecRef.current)
+        const cam = cameraAtFusionTime(rel, fusionSegmentsDone)
         if (cam) setProgramCameraId(cam)
       }
       const pv = fusionPreviewVideoRef.current
@@ -997,7 +1370,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
   /**
    * Alinear miniaturas al tiempo de la barra cuando NO estás en play.
    * En play, `currentTime` se actualiza ~cada 100 ms y este efecto con umbral 0.05 peleaba con el tick
-   * (0.25 en ISO / lógica distinta en thumbs) → seeks en bucle en una miniatura; tras varias vistas previa canceladas se notaba más.
+   * (0.25 en ISO / lógica distinta en thumbs) �  seeks en bucle en una miniatura; tras varias vistas previa canceladas se notaba más.
    */
   useEffect(() => {
     if (selectorMode !== 'thumbnails' || !clips.length) return
@@ -1018,14 +1391,16 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
   const stopFusionRecord = useCallback(async () => {
     const rec = recRef.current
     if (!rec) return
-    const tEnd = getMasterTime()
-    if (openFusionSeg) {
-      setFusionSegmentsDone((prev) => [
-        ...prev,
-        { startSec: openFusionSeg.startSec, endSec: tEnd, cameraId: openFusionSeg.cameraId }
-      ])
-    }
-    setOpenFusionSeg(null)
+    const tEnd = getFusionPlanTimeSec()
+    setOpenFusionSeg((open) => {
+      if (open) {
+        setFusionSegmentsDone((prev) => [
+          ...prev,
+          { startSec: open.startSec, endSec: tEnd, cameraId: open.cameraId }
+        ])
+      }
+      return null
+    })
     setFusionRecorderPaused(false)
     const mimeType = rec.mimeType
     await new Promise<void>((resolve) => {
@@ -1053,9 +1428,9 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
     onStatus(
       'Grabación lista: revisá la vista previa, mové el tiempo en la barra o el control y guardá cuando quieras.'
     )
-  }, [fusionPreviewUrl, getMasterTime, onStatus, openFusionSeg, pauseAll, sessionId])
+  }, [fusionPreviewUrl, getFusionPlanTimeSec, onStatus, pauseAll, sessionId])
 
-  /** Fin de la pista maestra: si `playing` queda true, el tick sigue haciendo play/seek en miniaturas `ended` → salto en bucle. */
+  /** Fin de la pista maestra: si `playing` queda true, el tick sigue haciendo play/seek en miniaturas `ended` �  salto en bucle. */
   useEffect(() => {
     if (fusionPreviewUrl || !clips.length) return
     const master =
@@ -1089,7 +1464,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
     setFusionExportBusy(true)
     setFusionExportTarget('webm')
     setFusionExportStartMs(Date.now())
-    onStatus(`Guardando WebM: ${name} …`)
+    onStatus(`Guardando WebM: ${name}${GLYPH.ellipsis}`)
     try {
       const buf = await blob.arrayBuffer()
       await window.studio.saveVideo(filePath, buf)
@@ -1121,7 +1496,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
     setFusionExportBusy(true)
     setFusionExportTarget('mp4')
     setFusionExportStartMs(Date.now())
-    onStatus('Generando MP4 con FFmpeg (puede tardar según la duración)…')
+    onStatus(`Generando MP4 con FFmpeg (puede tardar según la duración)${GLYPH.ellipsis}`)
     try {
       const buf = await blob.arrayBuffer()
       const r = await window.studio.saveFusionMp4(filePath, buf)
@@ -1292,7 +1667,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
       if (e.data.size) parts.push(e.data)
     }
     recRef.current = rec
-    /** Sin timeslice: un solo `dataavailable` al parar — evita trabajo cada ~100 ms que tironeaba el hilo principal. */
+    /** Sin timeslice: un solo `dataavailable` al parar � evita trabajo cada ~100 ms que tironeaba el hilo principal. */
     rec.start()
     setFusionRecording(true)
     setFusionRecorderPaused(false)
@@ -1317,6 +1692,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
     audioGraph.processedTrack,
     audioUrl,
     clips,
+    fusionPlanAirId,
     getMasterTime,
     onStatus,
     outputDir,
@@ -1398,51 +1774,6 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
         explorador y elegí «Todos los archivos».
       </div>
 
-      {outputDir ? (
-        <div style={pathLineMuted}>
-          Carpeta: <span style={pathTextBright}>{outputDir}</span>
-        </div>
-      ) : (
-        <div
-          style={{
-            padding: '10px 12px',
-            borderRadius: 10,
-            border: '1px solid #854d0e',
-            background: '#1c1410',
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: 10,
-            alignItems: 'center',
-            justifyContent: 'space-between'
-          }}
-        >
-          <div style={{ ...warnLineNoFolder, flex: '1 1 240px', minWidth: 0 }}>
-            <strong style={{ color: '#fef3c7' }}>Falta elegir carpeta.</strong> Sin carpeta no podés guardar la fusión
-            (WebM o MP4) ni usar «Guardar en carpeta de grabación». Elegila con «Carpeta de grabación» en la barra superior
-            de esta pestaña
-            {onPickOutputDir ? ', o con el botón de acá' : ''}.
-          </div>
-          {onPickOutputDir ? (
-            <button
-              type="button"
-              disabled={liveRecording}
-              onClick={() => void onPickOutputDir()}
-              style={{
-                ...btnNeutral,
-                border: '1px solid #b45309',
-                background: liveRecording ? '#334155' : '#78350f',
-                color: '#fffbeb',
-                fontWeight: 600,
-                cursor: liveRecording ? 'not-allowed' : 'pointer',
-                flexShrink: 0
-              }}
-            >
-              Elegir carpeta de grabación…
-            </button>
-          ) : null}
-        </div>
-      )}
-
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
         <button
           type="button"
@@ -1456,7 +1787,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
             color: '#e2e8f0'
           }}
         >
-          Cargar pistas WebM…
+          Cargar pistas WebM{GLYPH.ellipsis}
         </button>
         <button
           type="button"
@@ -1473,7 +1804,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
             cursor: audioUrl ? 'pointer' : 'not-allowed'
           }}
         >
-          <span aria-hidden style={{ fontSize: 13 }}>≋</span>
+          <span aria-hidden style={{ fontSize: 14 }}>{GLYPH.eq}</span>
           {audioGraph.gains.some((g) => Math.abs(g) > 0.05) && !audioGraph.bypass
             ? ' EQ · activo'
             : ' EQ'}
@@ -1504,73 +1835,24 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
 
       {clips.length > 0 ? (
         <div className="fusion-workspace">
-          <div className="fusion-main-flow">
-            <div
-              style={{
-                position: 'sticky',
-                top: 0,
-                zIndex: 20,
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: 8,
-                alignItems: 'center',
-                paddingBottom: 10,
-                marginBottom: 2,
-                marginLeft: -4,
-                marginRight: -4,
-                paddingLeft: 4,
-                paddingRight: 4,
-                paddingTop: 4,
-                background: '#080f18',
-                borderBottom: '1px solid #1e293b'
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => void togglePlay()}
-                style={{
-                  padding: '8px 14px',
-                  borderRadius: 8,
-                  border: '1px solid #475569',
-                  background: transportPlaying ? '#422006' : '#14532d',
-                  color: transportPlaying ? '#fde68a' : '#dcfce7',
-                  fontWeight: 600,
-                  flexShrink: 0
-                }}
-              >
-                {fusionPreviewUrl
-                  ? transportPlaying
-                    ? 'Pausar vista previa'
-                    : 'Reproducir vista previa'
-                  : transportPlaying
-                    ? 'Pausar'
-                    : 'Reproducir'}
-              </button>
-              <input
-                type="range"
-                min={0}
-                max={Math.max(duration || 0, timelineScaleDuration)}
-                step={0.05}
-                value={Math.min(currentTime, Math.max(duration || 0, timelineScaleDuration))}
-                onChange={(e) => seek(Number(e.target.value))}
-                style={{ flex: '1 1 140px', minWidth: 100 }}
-              />
-              <span
-                style={{
-                  fontSize: 12,
-                  color: '#94a3b8',
-                  fontVariantNumeric: 'tabular-nums',
-                  flexShrink: 0
-                }}
-              >
-                {fmt(currentTime)} / {fmt(duration)}
-              </span>
-            </div>
-
-            <div style={{ textAlign: 'center', margin: '0 auto 2px', maxWidth: 560 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>Fusión en vivo</div>
-              <div style={{ fontSize: 11, color: '#64748b', marginTop: 4, lineHeight: 1.4 }}>
-                Lo que elegís en las cámaras es lo que se ve y se exporta al grabar.
+          <div className="fusion-program-heading">
+            <div style={{ textAlign: 'center', margin: '0 auto', maxWidth: 560 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>Programa (salida)</div>
+              <div style={{ fontSize: 11, color: '#64748b', marginTop: 4, lineHeight: 1.45 }}>
+                Mezcla de las grabaciones cargadas. Elegí la escena con la barra izquierda del programa y las
+                cámaras en las fuentes a la derecha.
+                {programLayoutId === 'single' ? (
+                  <>
+                    {' '}
+                    <strong>Recorte</strong> / <strong>Zoom</strong>: pellizco y mover a la vez (sin
+                    soltar); clic y arrastrar en zoom.
+                  </>
+                ) : (
+                  <>
+                    {' '}
+                    En multi-cámara: tocá un recuadro en el programa y asigná con la miniatura.
+                  </>
+                )}
               </div>
             </div>
 
@@ -1636,96 +1918,297 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                 </button>
               ) : null}
             </div>
-
-            <div className="fusion-preview-box">
-              {/*
-              Canvas centrado con proporción fija (evita estirar horizontal el bitmap).
-              Los <video> siguen en .fusion-video-decoders solo para decodificar / drawImage.
-              Mouse: rueda = zoom (anclado al cursor), arrastrar = pan, clic = centrar, doble clic = reset.
-            */}
-              <div className="fusion-preview-inner">
-                <canvas
-                  ref={canvasRef}
-                  width={1280}
-                  height={720}
-                  onWheel={onProgramWheel}
-                  onMouseDown={onProgramMouseDown}
-                  onMouseMove={onProgramMouseMove}
-                  onMouseUp={onProgramMouseUp}
-                  onMouseLeave={onProgramMouseUp}
-                  onClick={onProgramClick}
-                  onDoubleClick={onProgramDoubleClick}
-                  style={{
-                    cursor: programCameraId
-                      ? programFramingTarget.zoom > 1.001
-                        ? 'grab'
-                        : 'zoom-in'
-                      : 'default',
-                    touchAction: 'none'
-                  }}
-                />
-              </div>
-              {programCameraId ? (
-                <div
-                  style={{
-                    position: 'absolute',
-                    top: 8,
-                    right: 8,
-                    zIndex: 2,
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '4px 8px',
-                    borderRadius: 8,
-                    background: 'rgba(2, 6, 23, 0.72)',
-                    border: '1px solid #1e293b',
-                    color: '#e2e8f0',
-                    fontSize: 11,
-                    pointerEvents: 'auto'
-                  }}
-                  onMouseDown={(ev) => ev.stopPropagation()}
-                  onDoubleClick={(ev) => ev.stopPropagation()}
-                >
-                  <span
-                    title="Rueda = zoom · arrastrar = pan · clic = centrar · doble clic = reset"
-                    style={{ color: '#94a3b8' }}
-                  >
-                    Encuadre
-                  </span>
-                  <span
-                    style={{
-                      fontVariantNumeric: 'tabular-nums',
-                      color: programFramingTarget.zoom > 1.001 ? '#7dd3fc' : '#64748b',
-                      minWidth: 36,
-                      textAlign: 'right'
-                    }}
-                  >
-                    {programFramingTarget.zoom.toFixed(2)}×
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => resetFraming(programCameraId)}
-                    disabled={
-                      programFramingTarget.zoom <= 1.001 &&
-                      Math.abs(programFramingTarget.offsetX - 0.5) < 1e-3 &&
-                      Math.abs(programFramingTarget.offsetY - 0.5) < 1e-3
-                    }
-                    title="Reset encuadre (doble clic también)"
-                    style={{
-                      padding: '2px 8px',
-                      borderRadius: 6,
-                      border: '1px solid #334155',
-                      background: '#0f172a',
-                      color: '#cbd5e1',
-                      cursor: 'pointer',
-                      fontSize: 11
-                    }}
-                  >
-                    Reset
-                  </button>
-                </div>
-              ) : null}
+            <div className="fusion-program-heading-sources">
+              Fuentes (tocá = al programa)
             </div>
+          </div>
+
+          <div className="fusion-stage">
+            <div className="fusion-main-flow">
+            <div className="fusion-preview-row">
+            <div className="fusion-preview-column">
+              <div className="fusion-program-layout">
+                {clips.length > 0 ? (
+                  <aside className="fusion-program-rail fusion-program-rail--left">
+                    <FusionSceneSwitcher
+                      programLayoutId={programLayoutId}
+                      onOpenConfig={() => setConfigPopoverOpen(true)}
+                      onSelectLayout={sendLayoutToProgram}
+                      showOrientationDot={!!suggestedOrientation && !orientationSuggestionDismissed}
+                      programRecording={fusionRecording}
+                    />
+                  </aside>
+                ) : null}
+                <div className="fusion-program-center">
+                <div
+                  className={`fusion-preview-box fusion-preview-box--${programOrientation}`}
+                  style={{
+                    aspectRatio: `${CANVAS_DIMS[programOrientation].w}/${CANVAS_DIMS[programOrientation].h}`
+                  }}
+                >
+                  <div className="fusion-preview-inner">
+                    <div className="fusion-preview-canvas-wrap">
+                  <canvas
+                    ref={canvasRef}
+                    width={CANVAS_DIMS[programOrientation].w}
+                    height={CANVAS_DIMS[programOrientation].h}
+                    onMouseDown={onProgramMouseDown}
+                    onMouseMove={onProgramMouseMove}
+                    onMouseUp={onProgramMouseUp}
+                    onMouseLeave={onProgramMouseUp}
+                    onClick={onProgramClick}
+                    onDoubleClick={onProgramDoubleClick}
+                    style={{
+                      cursor:
+                        framingEditable && !cropEditOpen
+                          ? programFramingTarget.zoom > 1.001
+                            ? 'grab'
+                            : 'zoom-in'
+                          : 'default',
+                      touchAction: 'none',
+                      pointerEvents: cropEditOpen || layoutEditable ? 'none' : 'auto'
+                    }}
+                  />
+                  {layoutEditable && !cropEditOpen ? (
+                    <ProgramLayoutEditorOverlay
+                      canvas={canvasRef.current}
+                      layoutId={programLayoutId}
+                      orientation={programOrientation}
+                      geometry={activeLayoutGeometry}
+                      geometryCeiling={activeLayoutGeometryCeiling}
+                      selectedSlotIndex={selectedLayoutSlot}
+                      slotCameraIds={programSlots}
+                      resolveAlias={cameraAliases.resolve}
+                      onSelectSlot={setSelectedLayoutSlot}
+                      onGeometryChange={(next) => {
+                        setLayoutGeometry((prev) => ({ ...prev, [programLayoutId]: next }))
+                        setLayoutGeometryTick((t) => t + 1)
+                      }}
+                      onSlotCeilingChange={(slotIndex, ceiling) => {
+                        setLayoutGeometryCeiling((prev) => {
+                          const n = getLayout(programLayoutId).slotsCount
+                          const base = [...(prev[programLayoutId] ?? [])]
+                          while (base.length < n) base.push(ceiling)
+                          const prevC = base[slotIndex] ?? ceiling
+                          base[slotIndex] = unionNormalizedSlotRects(prevC, ceiling)
+                          const next = { ...prev, [programLayoutId]: base }
+                          layoutGeometryCeilingRef.current = next
+                          return next
+                        })
+                      }}
+                      onSlotCeilingTranslate={(slotIndex, ceiling) => {
+                        setLayoutGeometryCeiling((prev) => {
+                          const n = getLayout(programLayoutId).slotsCount
+                          const base = [...(prev[programLayoutId] ?? [])]
+                          while (base.length < n) base.push(ceiling)
+                          base[slotIndex] = ceiling
+                          const next = { ...prev, [programLayoutId]: base }
+                          layoutGeometryCeilingRef.current = next
+                          return next
+                        })
+                      }}
+                      onSlotEdgeCropHandle={(slotIndex, handle) => {
+                        applySlotEdgeCropHandle(programLayoutId, slotIndex, handle)
+                      }}
+                      onSlotCropReset={(slotIndex) => {
+                        const id = programSlots[slotIndex]
+                        if (!id) return
+                        cropTargetRef.current.set(id, { ...CROP_FULL })
+                        setCropTick((t) => t + 1)
+                      }}
+                      onResetLayout={() => {
+                        const dim = CANVAS_DIMS[programOrientation]
+                        const preset = presetLayoutGeometry(programLayoutId, dim.w, dim.h)
+                        setLayoutGeometry((prev) => ({ ...prev, [programLayoutId]: preset }))
+                        setLayoutGeometryCeiling((prev) => ({
+                          ...prev,
+                          [programLayoutId]: preset.map((r) => ({ ...r }))
+                        }))
+                        layoutEdgeCropHandleRef.current = {
+                          ...layoutEdgeCropHandleRef.current,
+                          [programLayoutId]: preset.map(() => null)
+                        }
+                        activeLayoutEdgeCropRef.current = null
+                        for (const id of programSlots) {
+                          if (id) cropTargetRef.current.set(id, { ...CROP_FULL })
+                        }
+                        setCropTick((t) => t + 1)
+                        setLayoutGeometryTick((t) => t + 1)
+                      }}
+                    />
+                  ) : null}
+                  {cropEditOpen && framingEditable && programCameraId ? (
+                    <ProgramCropOverlay
+                      canvas={canvasRef.current}
+                      video={videoRefs.current.get(programCameraId) ?? null}
+                      crop={programCrop}
+                      rotateDeg={programRotateDeg}
+                      onCropChange={(next) => updateCrop(programCameraId, next)}
+                    />
+                  ) : null}
+                </div>
+              </div>
+                </div>
+                <FusionCameraPlanBar
+                  visible={clips.length > 0}
+                  segments={timelineSegments}
+                  scaleDuration={timelineScaleDuration}
+                  currentTime={fusionPlanTimeSec}
+                  segmentColor={(id) => fusionSegmentColor(fusionCameraColors, id)}
+                  resolveAlias={cameraAliases.resolve}
+                  legendCameraIds={cameraIds}
+                  onSeek={(t) => seek(fusionRecordStartSecRef.current + t)}
+                />
+                </div>
+                {clips.length > 0 ? (
+                  <aside className="fusion-program-rail fusion-program-rail--right">
+                    <FusionProgramBackgroundTools
+                      background={programBackground}
+                      cameraIds={clips.map((c) => c.cameraId)}
+                      resolveAlias={cameraAliases.resolve}
+                      onBackgroundChange={setProgramBackground}
+                    />
+                    {framingEditable && programCameraId ? (
+                      <FusionProgramTools
+                        cropEditOpen={cropEditOpen}
+                        programCrop={programCrop}
+                        programFramingTarget={programFramingTarget}
+                        framingNeutral={FRAMING_NEUTRAL}
+                        onToggleCropEdit={toggleCropEdit}
+                        onResetCrop={() => resetCrop(programCameraId)}
+                        onResetFraming={() => resetFraming(programCameraId)}
+                      />
+                    ) : null}
+                  </aside>
+                ) : null}
+              </div>
+            </div>
+          <aside className="fusion-sidebar">
+            <div
+              className="fusion-sidebar-sources--mobile"
+              style={{ fontSize: 11, fontWeight: 600, color: '#64748b', letterSpacing: 0.04, marginBottom: 8 }}
+            >
+              Fuentes (tocá = al programa)
+            </div>
+            <div className="fusion-thumb-strip">
+              {clips.map((c) => {
+                const onAir = programSlots.includes(c.cameraId)
+                const cardClass = onAir
+                  ? 'fusion-thumb-card fusion-thumb-card--on-air-manual'
+                  : 'fusion-thumb-card fusion-thumb-card--idle'
+                return (
+                  <div key={c.cameraId} className={cardClass}>
+                    <div className="fusion-thumb-preview-wrap">
+                      <button
+                        type="button"
+                        className="fusion-thumb-pick"
+                        onClick={() => assignCameraToProgram(c.cameraId)}
+                        title={
+                          layoutEditable
+                            ? `Asignar a recuadro ${selectedLayoutSlot + 1}: ${cameraAliases.resolve(c.cameraId)}`
+                            : `Programa: ${cameraAliases.resolve(c.cameraId)}`
+                        }
+                      >
+                        <div className="fusion-thumb-pick-video">
+                          <video
+                            ref={(el) => setThumbVideoRef(c.cameraId, el)}
+                            src={c.fileUrl}
+                            muted
+                            playsInline
+                            preload="auto"
+                            onLoadedData={(e) => {
+                              const th = e.currentTarget
+                              const master =
+                                audioUrl && audioRef.current
+                                  ? audioRef.current
+                                  : videoRefs.current.get(clips[0]!.cameraId)
+                              if (master && Number.isFinite(master.currentTime)) {
+                                th.currentTime = master.currentTime
+                              }
+                              if (playingRef.current && !th.ended) {
+                                void th.play().catch(() => {})
+                              }
+                            }}
+                            style={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'contain',
+                              display: 'block',
+                              pointerEvents: 'none'
+                            }}
+                          />
+                        </div>
+                      </button>
+                      <button
+                        type="button"
+                        className="fusion-thumb-overlay-btn fusion-thumb-rotate"
+                        onClick={() => bumpRotate(c.cameraId)}
+                        title="Girar imagen 90°"
+                        aria-label={`Rotar ${cameraAliases.resolve(c.cameraId)}`}
+                      >
+                        {GLYPH.rotate}
+                      </button>
+                      <button
+                        type="button"
+                        className="fusion-thumb-overlay-btn fusion-thumb-close"
+                        onClick={() => {
+                          removeClipFromSession(c.cameraId)
+                          onStatus(`Pista «${cameraAliases.resolve(c.cameraId)}» quitada de la sesión.`)
+                        }}
+                        title="Quitar esta grabación de la sesión"
+                        aria-label={`Quitar ${cameraAliases.resolve(c.cameraId)}`}
+                      >
+                        {GLYPH.close}
+                      </button>
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 10,
+                        fontWeight: onAir ? 700 : 500,
+                        color: onAir ? '#99f6e4' : '#94a3b8',
+                        textAlign: 'center',
+                        wordBreak: 'break-word'
+                      }}
+                      title={
+                        cameraAliases.resolve(c.cameraId) !== c.cameraId ? `ID: ${c.cameraId}` : undefined
+                      }
+                    >
+                      {cameraAliases.resolve(c.cameraId)}
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </aside>
+            </div>
+
+          <FusionStudioTransport
+            mode="files"
+            visible
+            playing={transportPlaying}
+            fusionRecording={fusionRecording}
+            fusionRecorderPaused={fusionRecorderPaused}
+            fusionPreviewUrl={fusionPreviewUrl}
+            recordPauseSupported={fusionRecorderSupportsPause}
+            canRecord={!disabledFusion}
+            canPlay={clips.length > 0 || fusionPreviewUrl !== null}
+            canCloseSession={
+              !(
+                fusionRecording ||
+                fusionExportBusy ||
+                (!clips.length && !audioUrl && !fusionPreviewUrl && !sessionId)
+              )
+            }
+            currentTime={currentTime}
+            duration={duration}
+            onTogglePlay={() => void togglePlay()}
+            onRecordStart={() => void startFusionRecord()}
+            onRecordPause={pauseFusionRecording}
+            onRecordResume={() => void resumeFusionRecording()}
+            onRecordStop={() => void stopFusionRecord()}
+            onCloseSession={closeFusionSession}
+          />
+
             <div className="fusion-video-decoders" aria-hidden>
               {clips.map((c) => (
                 <video
@@ -1735,8 +2218,8 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                   preload="auto"
                   muted
                   playsInline
-                  onLoadedMetadata={refreshDuration}
-                  onLoadedData={refreshDuration}
+                  onLoadedMetadata={(e) => reportVideoAspect(c.cameraId, e.currentTarget)}
+                  onLoadedData={(e) => reportVideoAspect(c.cameraId, e.currentTarget)}
                   onDurationChange={refreshDuration}
                   style={{
                     position: 'absolute',
@@ -1749,120 +2232,6 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                 />
               ))}
             </div>
-
-            <div style={{ width: '100%', maxWidth: 960, margin: '0 auto' }}>
-                <div
-                  ref={timelineBarRef}
-                  style={{
-                    position: 'relative',
-                    height: 40,
-                    borderRadius: 8,
-                    background: '#0f172a',
-                    border: '1px solid #1e293b',
-                    overflow: 'hidden'
-                  }}
-                >
-                  {timelineSegments.map((seg, i) => {
-                    const total = timelineScaleDuration
-                    const leftPct = (seg.startSec / total) * 100
-                    const widthPct = Math.max(
-                      0.35,
-                      ((seg.endSec - seg.startSec) / total) * 100
-                    )
-                    return (
-                      <div
-                        key={`${seg.cameraId}-${i}-${seg.startSec}`}
-                        title={`${cameraAliases.resolve(seg.cameraId)} · ${fmt(seg.startSec)} → ${fmt(seg.endSec)}${
-                          cameraAliases.resolve(seg.cameraId) !== seg.cameraId ? ` (${seg.cameraId})` : ''
-                        }`}
-                        style={{
-                          position: 'absolute',
-                          left: `${leftPct}%`,
-                          width: `${widthPct}%`,
-                          top: 0,
-                          bottom: 0,
-                          background: fusionSegmentColor(fusionCameraColors, seg.cameraId),
-                          opacity: 0.88,
-                          borderRight: '1px solid rgba(15,23,42,0.85)',
-                          boxSizing: 'border-box'
-                        }}
-                      />
-                    )
-                  })}
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: `${Math.min(100, (currentTime / timelineScaleDuration) * 100)}%`,
-                      top: 0,
-                      bottom: 0,
-                      width: 2,
-                      marginLeft: -1,
-                      background: '#f8fafc',
-                      boxShadow: '0 0 8px #38bdf8',
-                      pointerEvents: 'none',
-                      zIndex: 3
-                    }}
-                  />
-                  <div
-                    role="presentation"
-                    aria-hidden
-                    style={{
-                      position: 'absolute',
-                      inset: 0,
-                      zIndex: 4,
-                      cursor: 'pointer'
-                    }}
-                    onClick={(e) => {
-                      const bar = timelineBarRef.current
-                      if (!bar) return
-                      const rect = bar.getBoundingClientRect()
-                      const w = rect.width || 1
-                      const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / w))
-                      seek(ratio * timelineScaleDuration)
-                    }}
-                  />
-                </div>
-                <div
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: 8,
-                    flexWrap: 'wrap',
-                    marginTop: 6,
-                    fontSize: 10,
-                    color: '#64748b'
-                  }}
-                >
-                  <span>
-                    Plan de cámara en el tiempo
-                    {duration <= 0 && (
-                      <span style={{ color: '#64748b' }}> · cargando duración…</span>
-                    )}
-                  </span>
-                  <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-                    {timelineSegments.length} tramo(s)
-                  </span>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 8 }}>
-                  {[...new Set(clips.map((c) => c.cameraId))].map((id) => (
-                    <span key={id} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10 }}>
-                      <span
-                        style={{
-                          width: 10,
-                          height: 10,
-                          borderRadius: 2,
-                          background: fusionSegmentColor(fusionCameraColors, id),
-                          flexShrink: 0
-                        }}
-                      />
-                      <span style={{ color: '#94a3b8' }} title={cameraAliases.resolve(id) !== id ? id : undefined}>
-                        {cameraAliases.resolve(id)}
-                      </span>
-                    </span>
-                  ))}
-                </div>
-
                 {fusionPreviewUrl ? (
                   <div
                     style={{
@@ -1877,9 +2246,9 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                       Vista previa del archivo grabado
                     </div>
                     <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8, lineHeight: 1.4 }}>
-                      «Reproducir vista previa» solo mueve el WebM exportado; la mezcla de arriba no se reproduce con
-                      ese botón. La línea de tiempo sigue controlando las pistas cargadas; si movés el tiempo ahí, la vista
-                      previa salta al mismo instante relativo. Pantalla completa / Esc; sin ícono duplicado en el vídeo.
+                      En la barra de abajo, «Play» con vista previa activa solo mueve el WebM exportado; la
+                      mezcla del programa no se reproduce con ese botón. La barra de tiempo controla las pistas cargadas;
+                      si movés el tiempo, la vista previa salta al mismo instante relativo. Pantalla completa / Esc.
                       {' '}
                       Podés guardar WebM (rápido) o MP4 H.264 (mejor en el Reproductor de Windows / barra de tiempo).
                     </div>
@@ -1979,7 +2348,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                       >
                         {fusionExportTarget === 'webm' ? (
                           <>
-                            <span className="studio-spinner" aria-hidden /> Guardando WebM…
+                            <span className="studio-spinner" aria-hidden /> Guardando WebM{GLYPH.ellipsis}
                           </>
                         ) : (
                           'Guardar WebM'
@@ -2004,7 +2373,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                       >
                         {fusionExportTarget === 'mp4' ? (
                           <>
-                            <span className="studio-spinner" aria-hidden /> Generando MP4…
+                            <span className="studio-spinner" aria-hidden /> Generando MP4{GLYPH.ellipsis}
                           </>
                         ) : (
                           'Guardar MP4 (recomendado Windows)'
@@ -2047,7 +2416,9 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                           <span className="studio-spinner lg" aria-hidden />
                           <div style={{ flex: 1, minWidth: 0, lineHeight: 1.45 }}>
                             <strong>
-                              {fusionExportTarget === 'mp4' ? 'Generando MP4…' : 'Guardando WebM…'}
+                              {fusionExportTarget === 'mp4'
+                                ? `Generando MP4${GLYPH.ellipsis}`
+                                : `Guardando WebM${GLYPH.ellipsis}`}
                             </strong>{' '}
                             {fusionExportTarget === 'mp4'
                               ? 'FFmpeg está re-codificando a H.264. Puede tardar bastante según la duración (no cierres la app).'
@@ -2070,264 +2441,315 @@ export function FusionPanel({ outputDir, liveRecording, onStatus, onPickOutputDi
                 ) : null}
               </div>
 
-            {selectorMode === 'compact' ? (
-              <div style={{ marginTop: 10 }}>
-                <div style={{ fontSize: 10, color: '#64748b', marginBottom: 6, textAlign: 'center' }}>
-                  Tocá el nombre para mandar esa cámara al programa.
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'center' }}>
-                  {clips.map((c) => (
-                    <button
-                      key={c.cameraId}
-                      type="button"
-                      title={cameraAliases.resolve(c.cameraId) !== c.cameraId ? `ID: ${c.cameraId}` : undefined}
-                      onClick={() => pickProgramCamera(c.cameraId)}
-                      style={{
-                        padding: '8px 12px',
-                        borderRadius: 8,
-                        border:
-                          programCameraId === c.cameraId ? '2px solid #38bdf8' : '1px solid #334155',
-                        background: programCameraId === c.cameraId ? '#0c4a6e' : '#0f172a',
-                        color: '#e2e8f0',
-                        fontSize: 12,
-                        fontWeight: programCameraId === c.cameraId ? 700 : 500
-                      }}
-                    >
-                      {cameraAliases.resolve(c.cameraId)}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+            </div>
+          </div>
+      ) : null}
 
+      {configPopoverOpen ? (
+        <div
+          role="dialog"
+          aria-modal
+          aria-label="Configuración por formato (Fusión por archivos)"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setConfigPopoverOpen(false)
+          }}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 60,
+            background: 'rgba(2, 6, 23, 0.6)',
+            backdropFilter: 'blur(2px)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'center',
+            padding: '5vh 12px',
+            overflowY: 'auto'
+          }}
+        >
+          <div
+            style={{
+              width: 'min(720px, 100%)',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              background: '#0c121c',
+              border: '1px solid #334155',
+              borderRadius: 14,
+              boxShadow: '0 24px 64px rgba(0,0,0,0.55)',
+              padding: 16,
+              color: '#e2e8f0'
+            }}
+          >
             <div
               style={{
                 display: 'flex',
-                justifyContent: 'center',
                 alignItems: 'center',
-                gap: 8,
-                flexWrap: 'wrap',
-                marginTop: selectorMode === 'compact' ? 10 : 6
+                justifyContent: 'space-between',
+                gap: 12,
+                marginBottom: 8
               }}
             >
-              <span style={{ fontSize: 11, color: '#94a3b8' }}>Selector:</span>
-              <button
-                type="button"
-                onClick={() => setSelectorMode('thumbnails')}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 8,
-                  border: selectorMode === 'thumbnails' ? '2px solid #38bdf8' : '1px solid #334155',
-                  background: selectorMode === 'thumbnails' ? '#0c4a6e' : '#0f172a',
-                  color: '#e2e8f0',
-                  fontSize: 11,
-                  fontWeight: selectorMode === 'thumbnails' ? 700 : 500,
-                  cursor: 'pointer'
-                }}
-              >
-                Miniaturas
-              </button>
-              <button
-                type="button"
-                onClick={() => setSelectorMode('compact')}
-                style={{
-                  padding: '6px 12px',
-                  borderRadius: 8,
-                  border: selectorMode === 'compact' ? '2px solid #38bdf8' : '1px solid #334155',
-                  background: selectorMode === 'compact' ? '#0c4a6e' : '#0f172a',
-                  color: '#e2e8f0',
-                  fontSize: 11,
-                  fontWeight: selectorMode === 'compact' ? 700 : 500,
-                  cursor: 'pointer'
-                }}
-              >
-                Solo nombres
-              </button>
-              <span style={{ fontSize: 10, color: '#475569' }}>(nombres = menos carga)</span>
-            </div>
-
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', marginTop: 10 }}>
-              <button
-                type="button"
-                disabled={disabledFusion}
-                onClick={() => void startFusionRecord()}
-                style={{
-                  padding: '8px 14px',
-                  borderRadius: 8,
-                  border: '1px solid transparent',
-                  background: '#7c3aed',
-                  color: 'white',
-                  fontWeight: 600,
-                  opacity: disabledFusion ? 0.45 : 1
-                }}
-              >
-                Grabar fusión
-              </button>
-              {fusionRecording && fusionRecorderSupportsPause ? (
-                fusionRecorderPaused ? (
-                  <button
-                    type="button"
-                    onClick={() => void resumeFusionRecording()}
-                    style={{
-                      padding: '8px 14px',
-                      borderRadius: 8,
-                      border: '1px solid #047857',
-                      background: '#065f46',
-                      color: '#ecfdf5',
-                      fontWeight: 600
-                    }}
-                  >
-                    Reanudar grabación
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => pauseFusionRecording()}
-                    style={{
-                      padding: '8px 14px',
-                      borderRadius: 8,
-                      border: '1px solid #92400e',
-                      background: '#78350f',
-                      color: '#fffbeb',
-                      fontWeight: 600
-                    }}
-                  >
-                    Pausar grabación
-                  </button>
-                )
-              ) : null}
-              <button
-                type="button"
-                disabled={!fusionRecording}
-                onClick={() => void stopFusionRecord()}
-                style={{
-                  padding: '8px 14px',
-                  borderRadius: 8,
-                  border: '1px solid #991b1b',
-                  background: fusionRecording ? '#b91c1c' : '#334155',
-                  color: '#fef2f2',
-                  fontWeight: 600,
-                  opacity: fusionRecording ? 1 : 0.5
-                }}
-              >
-                Finalizar grabación
-              </button>
-              {fusionRecording ? (
-                <span style={{ fontSize: 12, fontWeight: 700, color: fusionRecorderPaused ? '#fdba74' : '#e9d5ff' }}>
-                  {fusionRecorderPaused ? '■ PAUSA' : '● GRABANDO'}
-                </span>
-              ) : null}
-              <button
-                type="button"
-                disabled={
-                  fusionRecording ||
-                  fusionExportBusy ||
-                  (!clips.length && !audioUrl && !fusionPreviewUrl && !sessionId)
-                }
-                onClick={() => closeFusionSession()}
-                title="Descarta las pistas cargadas, el plan y la vista previa (no borra archivos del disco)"
-                style={{
-                  padding: '8px 14px',
-                  borderRadius: 8,
-                  border: '1px solid #475569',
-                  background: '#1f2937',
-                  color: '#e2e8f0',
-                  fontWeight: 600,
-                  marginLeft: 'auto',
-                  opacity:
-                    fusionRecording ||
-                    fusionExportBusy ||
-                    (!clips.length && !audioUrl && !fusionPreviewUrl && !sessionId)
-                      ? 0.45
-                      : 1
-                }}
-              >
-                Cancelar
-              </button>
-            </div>
-          </div>
-
-          {selectorMode === 'thumbnails' ? (
-            <aside className="fusion-sidebar">
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#64748b', letterSpacing: 0.04 }}>
-                Cámaras
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 700 }}>Configuración por formato</div>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, lineHeight: 1.45 }}>
+                  Elegí qué grabaciones van en cada formato y la orientación de salida. Los botones de la barra
+                  izquierda del programa aplican cada formato a la mezcla.
+                </div>
               </div>
-              <div className="fusion-thumb-strip">
-                {clips.map((c) => (
-                  <button
-                    key={`thumb-${c.cameraId}`}
-                    type="button"
-                    onClick={() => pickProgramCamera(c.cameraId)}
-                    title={`Enviar ${cameraAliases.resolve(c.cameraId)} al programa${
-                      cameraAliases.resolve(c.cameraId) !== c.cameraId ? ` · ID: ${c.cameraId}` : ''
-                    }`}
-                    style={{
-                      padding: 6,
-                      borderRadius: 10,
-                      border:
-                        programCameraId === c.cameraId ? '3px solid #38bdf8' : '1px solid #334155',
-                      background: programCameraId === c.cameraId ? '#0f2438' : '#0c121c',
-                      cursor: 'pointer',
-                      width: '100%',
-                      maxWidth: 200,
-                      flexShrink: 0,
-                      boxSizing: 'border-box'
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: '100%',
-                        aspectRatio: '16 / 9',
-                        borderRadius: 6,
-                        overflow: 'hidden',
-                        background: '#020617'
-                      }}
-                    >
-                      <video
-                        ref={(el) => setThumbVideoRef(c.cameraId, el)}
-                        src={c.fileUrl}
-                        muted
-                        playsInline
-                        preload="auto"
-                        onLoadedData={(e) => {
-                          const th = e.currentTarget
-                          const master =
-                            audioUrl && audioRef.current
-                              ? audioRef.current
-                              : videoRefs.current.get(clips[0]!.cameraId)
-                          if (master && Number.isFinite(master.currentTime)) {
-                            th.currentTime = master.currentTime
-                          }
-                          if (playingRef.current && !th.ended) {
-                            void th.play().catch(() => {})
-                          }
+              <button
+                type="button"
+                onClick={() => setConfigPopoverOpen(false)}
+                aria-label="Cerrar configuración"
+                style={{
+                  padding: '6px 10px',
+                  borderRadius: 8,
+                  border: '1px solid #334155',
+                  background: '#0f172a',
+                  color: '#e2e8f0',
+                  fontSize: 14,
+                  cursor: 'pointer',
+                  flexShrink: 0
+                }}
+              >
+                �
+              </button>
+            </div>
+
+            {!clips.length ? (
+              <div style={{ fontSize: 11, color: '#94a3b8', padding: '12px 0' }}>
+                Cargá las grabaciones cam-*.webm para configurar los formatos.
+              </div>
+            ) : (
+              <>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    gap: 8,
+                    marginTop: 10,
+                    marginBottom: 10,
+                    paddingBottom: 10,
+                    borderBottom: '1px solid #1e293b'
+                  }}
+                >
+                  <span style={{ fontSize: 11, color: '#94a3b8' }}>Orientación de salida:</span>
+                  {(['landscape', 'portrait', 'square'] as ProgramOrientation[]).map((o) => {
+                    const active = programOrientation === o
+                    const locked = fusionRecording || fusionExportBusy || Boolean(fusionPreviewUrl)
+                    return (
+                      <button
+                        key={`orient-file-${o}`}
+                        type="button"
+                        disabled={locked}
+                        onClick={() => {
+                          if (locked) return
+                          setProgramOrientation(o)
+                          setOrientationSuggestionDismissed(true)
                         }}
                         style={{
-                          width: '100%',
-                          height: '100%',
-                          objectFit: 'contain',
-                          display: 'block',
-                          pointerEvents: 'none'
+                          padding: '6px 10px',
+                          borderRadius: 8,
+                          border: active ? '2px solid #38bdf8' : '1px solid #334155',
+                          background: active ? '#0c4a6e' : '#0f172a',
+                          color: '#e2e8f0',
+                          fontSize: 11,
+                          fontWeight: active ? 700 : 500,
+                          cursor: locked ? 'not-allowed' : 'pointer',
+                          opacity: locked ? 0.55 : 1
                         }}
-                      />
-                    </div>
-                    <div
+                      >
+                        {ORIENTATION_LABEL[o]}
+                      </button>
+                    )
+                  })}
+                  <span style={{ fontSize: 10, color: '#475569' }}>
+                    Salida: {CANVAS_DIMS[programOrientation].w}�{CANVAS_DIMS[programOrientation].h}
+                  </span>
+                </div>
+
+                {suggestedOrientation && !orientationSuggestionDismissed ? (
+                  <div
+                    role="status"
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      alignItems: 'center',
+                      gap: 10,
+                      marginBottom: 10,
+                      padding: '8px 10px',
+                      borderRadius: 8,
+                      border: '1px solid #1d4ed8',
+                      background: '#0b1a3a',
+                      color: '#dbeafe',
+                      fontSize: 11
+                    }}
+                  >
+                    <span>
+                      Las grabaciones parecen ser{' '}
+                      <strong>{ORIENTATION_LABEL[suggestedOrientation].toLowerCase()}</strong>. ¿Cambiar la salida?
+                    </span>
+                    <button
+                      type="button"
+                      disabled={fusionRecording || fusionExportBusy || Boolean(fusionPreviewUrl)}
+                      onClick={() => {
+                        setProgramOrientation(suggestedOrientation)
+                        setOrientationSuggestionDismissed(true)
+                      }}
                       style={{
-                        marginTop: 6,
-                        fontSize: 10,
-                        fontWeight: programCameraId === c.cameraId ? 700 : 500,
-                        color: programCameraId === c.cameraId ? '#7dd3fc' : '#94a3b8',
-                        textAlign: 'center',
-                        wordBreak: 'break-word'
+                        padding: '4px 10px',
+                        borderRadius: 6,
+                        border: '1px solid #2563eb',
+                        background: '#1e40af',
+                        color: '#eff6ff',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        cursor: 'pointer'
                       }}
                     >
-                      {cameraAliases.resolve(c.cameraId)}
-                    </div>
+                      Sí, cambiar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setOrientationSuggestionDismissed(true)}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: 6,
+                        border: '1px solid #334155',
+                        background: '#0f172a',
+                        color: '#e2e8f0',
+                        fontSize: 11,
+                        cursor: 'pointer'
+                      }}
+                    >
+                      No, dejar {ORIENTATION_LABEL[programOrientation]}
+                    </button>
+                  </div>
+                ) : null}
+
+                <div
+                  style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}
+                  role="tablist"
+                  aria-label="Editar formato"
+                >
+                  {PROGRAM_LAYOUTS.map((p) => {
+                    const editing = editingLayoutId === p.id
+                    const live = programLayoutId === p.id
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        role="tab"
+                        aria-selected={editing}
+                        onClick={() => setEditingLayoutId(p.id)}
+                        style={{
+                          padding: '6px 10px',
+                          borderRadius: 8,
+                          border: editing ? '2px solid #38bdf8' : '1px solid #334155',
+                          background: editing ? '#0c4a6e' : '#0f172a',
+                          color: '#e2e8f0',
+                          fontSize: 11,
+                          fontWeight: editing ? 700 : 500,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          cursor: 'pointer'
+                        }}
+                      >
+                        <span>{p.short}</span>
+                        {live ? (
+                          <span
+                            style={{
+                              fontSize: 9,
+                              padding: '1px 6px',
+                              borderRadius: 999,
+                              background: '#7c2d12',
+                              color: '#fed7aa',
+                              fontWeight: 700
+                            }}
+                          >
+                            AL AIRE
+                          </span>
+                        ) : null}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
+                    gap: 8
+                  }}
+                >
+                  {getLayout(editingLayoutId)
+                    .slotLabels(programOrientation)
+                    .map((label, i) => {
+                      const cur = (layoutAssignments[editingLayoutId] ?? [])[i] ?? ''
+                      return (
+                        <label
+                          key={`slot-file-${editingLayoutId}-${i}`}
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 4,
+                            fontSize: 10,
+                            color: '#94a3b8'
+                          }}
+                        >
+                          <span style={{ color: '#cbd5e1', fontWeight: 600 }}>
+                            Slot {i + 1} · {label}
+                          </span>
+                          <select
+                            value={cur}
+                            onChange={(e) =>
+                              setSlotForLayout(editingLayoutId, i, e.target.value || null)
+                            }
+                            style={{
+                              padding: '6px 8px',
+                              borderRadius: 8,
+                              border: '1px solid #475569',
+                              background: '#020617',
+                              color: '#e2e8f0',
+                              fontSize: 12
+                            }}
+                          >
+                            <option value="">� Vacío (negro) �</option>
+                            {cameraIds.map((cid) => (
+                              <option key={cid} value={cid}>
+                                {cameraAliases.resolve(cid)}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )
+                    })}
+                </div>
+
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      sendLayoutToProgram(editingLayoutId)
+                      setConfigPopoverOpen(false)
+                    }}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: 8,
+                      border: '1px solid #2dd4bf',
+                      background: '#134e4a',
+                      color: '#ccfbf1',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Aplicar {getLayout(editingLayoutId).short} al programa
                   </button>
-                ))}
-              </div>
-            </aside>
-          ) : null}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       ) : null}
 

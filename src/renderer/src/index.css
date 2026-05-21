@@ -100,12 +100,682 @@ button:not(:disabled) {
   }
 }
 
+/* Sesión en vivo — mesa de grabación ISO (transporte tipo panel) */
+.studio-transport {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid #334155;
+  background: linear-gradient(180deg, #0c121c 0%, #070b12 100%);
+  box-shadow: inset 0 1px 0 rgba(148, 163, 184, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.studio-transport--live {
+  border-color: #7f1d1d;
+  background: linear-gradient(180deg, #1a0a0a 0%, #0f0707 100%);
+}
+
+.studio-transport--paused {
+  border-color: #854d0e;
+  background: linear-gradient(180deg, #1c1410 0%, #0f0a06 100%);
+}
+
+.studio-transport__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.studio-transport__sources {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+.studio-transport__deck {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid #1e293b;
+  background: #020617;
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+.studio-transport__tally {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 88px;
+}
+
+.studio-transport__lamp {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #334155;
+  border: 1px solid #475569;
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+.studio-transport__lamp--on {
+  background: #ef4444;
+  border-color: #fca5a5;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.75);
+}
+
+.studio-transport__lamp--pause {
+  background: #f59e0b;
+  border-color: #fcd34d;
+  box-shadow: 0 0 10px rgba(245, 158, 11, 0.5);
+}
+
+.studio-transport__tally-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: #64748b;
+}
+
+.studio-transport--live .studio-transport__tally-label {
+  color: #fca5a5;
+}
+
+.studio-transport--paused .studio-transport__tally-label {
+  color: #fcd34d;
+}
+
+.studio-transport__clock {
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  color: #e2e8f0;
+  letter-spacing: 0.04em;
+  line-height: 1;
+}
+
+.studio-transport--live .studio-transport__clock {
+  color: #fecaca;
+}
+
+.studio-transport__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+
+.studio-transport-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  border-radius: 8px;
+  border: 1px solid #475569;
+  background: #1e293b;
+  color: #f1f5f9;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  min-height: 44px;
+  transition: background 0.12s, border-color 0.12s, opacity 0.12s;
+}
+
+.studio-transport-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.studio-transport-btn__icon {
+  font-size: 14px;
+  line-height: 1;
+  opacity: 0.95;
+}
+
+.studio-transport-btn--record {
+  border-color: #b91c1c;
+  background: linear-gradient(180deg, #dc2626 0%, #991b1b 100%);
+  color: #fff;
+  padding-left: 18px;
+  padding-right: 20px;
+}
+
+.studio-transport-btn--record:not(:disabled):hover {
+  background: linear-gradient(180deg, #ef4444 0%, #b91c1c 100%);
+}
+
+.studio-transport-btn--pause {
+  border-color: #475569;
+  background: #0f172a;
+}
+
+.studio-transport-btn--resume {
+  border-color: #047857;
+  background: linear-gradient(180deg, #059669 0%, #065f46 100%);
+  color: #ecfdf5;
+}
+
+.studio-transport-btn--stop {
+  border-color: #7f1d1d;
+  background: linear-gradient(180deg, #991b1b 0%, #450a0a 100%);
+  color: #fef2f2;
+}
+
+.studio-transport-btn--pending {
+  border-color: #475569;
+  background: #334155;
+  color: #cbd5e1;
+}
+
+.studio-transport__status {
+  margin: 0;
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.45;
+}
+
+.studio-transport__lamp--play {
+  background: #22c55e;
+  border-color: #86efac;
+  box-shadow: 0 0 10px rgba(34, 197, 94, 0.45);
+}
+
+.studio-transport-btn--play {
+  border-color: #047857;
+  background: linear-gradient(180deg, #059669 0%, #065f46 100%);
+  color: #ecfdf5;
+}
+
+.studio-transport-btn--play.studio-transport-btn--playing {
+  border-color: #92400e;
+  background: linear-gradient(180deg, #b45309 0%, #78350f 100%);
+  color: #fffbeb;
+}
+
+.studio-transport-btn--record-fusion {
+  border-color: #6d28d9;
+  background: linear-gradient(180deg, #7c3aed 0%, #5b21b6 100%);
+  color: #f5f3ff;
+}
+
+.studio-transport-btn--record-fusion:not(:disabled):hover {
+  background: linear-gradient(180deg, #8b5cf6 0%, #6d28d9 100%);
+}
+
+.studio-transport-btn--neutral {
+  border-color: #475569;
+  background: #1f2937;
+  color: #e2e8f0;
+}
+
+/* Fusión con archivos — barra de transporte anclada bajo el programa */
+.fusion-dock-transport {
+  flex-shrink: 0;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: linear-gradient(180deg, #0c121c 0%, #070b12 100%);
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+.fusion-dock-transport--docked {
+  position: sticky;
+  bottom: 0;
+  z-index: 12;
+  margin-top: 6px;
+}
+
+.fusion-dock-transport--floating {
+  position: fixed;
+  z-index: 55;
+  width: min(420px, calc(100vw - 16px));
+  border-radius: 10px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+
+.fusion-dock-transport--live {
+  border-color: #7f1d1d;
+}
+
+.fusion-dock-transport--paused {
+  border-color: #854d0e;
+}
+
+.fusion-dock-transport--minimized .fusion-dock-transport__toolbar {
+  border-bottom: none;
+}
+
+.fusion-dock-transport__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 4px 8px;
+  border-bottom: 1px solid #1e293b;
+  min-height: 36px;
+}
+
+.fusion-dock-transport--floating .fusion-dock-transport__toolbar {
+  cursor: grab;
+  user-select: none;
+}
+
+.fusion-dock-transport--floating .fusion-dock-transport__toolbar:active {
+  cursor: grabbing;
+}
+
+.fusion-dock-transport__toolbar-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.fusion-dock-transport__chrome-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.fusion-dock-transport__chrome-btn:hover {
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+.fusion-dock-transport__chrome-btn--on {
+  border-color: #38bdf8;
+  color: #7dd3fc;
+}
+
+.fusion-dock-transport__lamp {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #475569;
+  flex-shrink: 0;
+}
+
+.fusion-dock-transport__lamp--rec {
+  background: #ef4444;
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.8);
+}
+
+.fusion-dock-transport__lamp--pause {
+  background: #f59e0b;
+}
+
+.fusion-dock-transport__lamp--play {
+  background: #22c55e;
+}
+
+.fusion-dock-transport__tally {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  color: #64748b;
+}
+
+.fusion-dock-transport--live .fusion-dock-transport__tally {
+  color: #fca5a5;
+}
+
+.fusion-dock-transport__time {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  color: #cbd5e1;
+}
+
+.fusion-dock-transport__sources {
+  font-size: 10px;
+  color: #64748b;
+  max-width: min(200px, 28vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fusion-dock-transport__status {
+  margin: 0;
+  padding: 4px 10px 6px;
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.35;
+  border-top: 1px solid #1e293b;
+}
+
+.fusion-dock-transport__buttons {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.fusion-dock-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  min-height: 28px;
+  border-radius: 6px;
+  border: 1px solid #475569;
+  background: #1e293b;
+  color: #f1f5f9;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.fusion-dock-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.fusion-dock-btn__label {
+  font-size: 11px;
+}
+
+.fusion-dock-btn--play {
+  border-color: #047857;
+  background: #065f46;
+  color: #ecfdf5;
+}
+
+.fusion-dock-btn--play.fusion-dock-btn--active {
+  border-color: #92400e;
+  background: #78350f;
+  color: #fffbeb;
+}
+
+.fusion-dock-btn--record {
+  border-color: #6d28d9;
+  background: #5b21b6;
+  color: #f5f3ff;
+}
+
+.fusion-dock-btn--pause {
+  background: #0f172a;
+}
+
+.fusion-dock-btn--resume {
+  border-color: #047857;
+  background: #065f46;
+  color: #ecfdf5;
+}
+
+.fusion-dock-btn--stop {
+  border-color: #7f1d1d;
+  background: #991b1b;
+  color: #fef2f2;
+}
+
+.fusion-dock-btn--ghost {
+  background: transparent;
+  border-color: #475569;
+  color: #94a3b8;
+}
+
+.fusion-dock-transport__timeline {
+  padding: 4px 8px 6px;
+}
+
+.fusion-dock-transport__plan {
+  position: relative;
+  height: 22px;
+  border-radius: 4px;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  overflow: hidden;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.fusion-dock-transport__seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  opacity: 0.9;
+  border-right: 1px solid rgba(15, 23, 42, 0.85);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+.fusion-dock-transport__playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #f8fafc;
+  box-shadow: 0 0 6px #38bdf8;
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Columna centro: pantalla programa + plan de cámara debajo (no al costado). */
+.fusion-program-center {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.fusion-program-center .fusion-preview-box {
+  align-self: center;
+}
+
+/* Plan de cámara bajo el programa (fusión archivos / en vivo) */
+.fusion-camera-plan {
+  width: 100%;
+  margin-top: 0;
+  padding: 8px 10px 10px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #0a1018;
+  box-sizing: border-box;
+}
+
+.fusion-program-center .fusion-camera-plan {
+  max-width: 100%;
+  align-self: stretch;
+}
+
+.fusion-camera-plan__header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 12px;
+  margin-bottom: 6px;
+}
+
+.fusion-camera-plan__title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #cbd5e1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fusion-camera-plan__hint {
+  font-size: 10px;
+  color: #64748b;
+}
+
+.fusion-camera-plan__track {
+  position: relative;
+  height: 32px;
+  border-radius: 6px;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  overflow: hidden;
+}
+
+.fusion-camera-plan__track--interactive {
+  cursor: pointer;
+  touch-action: none;
+}
+
+.fusion-camera-plan__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 0 10px;
+  font-size: 10px;
+  color: #64748b;
+  text-align: center;
+  line-height: 1.35;
+}
+
+.fusion-camera-plan__seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  margin: 0;
+  padding: 0 4px;
+  border: none;
+  border-right: 1px solid rgba(15, 23, 42, 0.85);
+  box-sizing: border-box;
+  cursor: pointer;
+  overflow: hidden;
+  opacity: 0.92;
+  transition: filter 0.12s, opacity 0.12s;
+}
+
+.fusion-camera-plan__seg:hover {
+  filter: brightness(1.08);
+  opacity: 1;
+}
+
+.fusion-camera-plan__seg-label {
+  display: block;
+  font-size: 9px;
+  font-weight: 700;
+  color: rgba(15, 23, 42, 0.85);
+  text-shadow: 0 0 2px rgba(255, 255, 255, 0.35);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 32px;
+  pointer-events: none;
+}
+
+.fusion-camera-plan__playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #f8fafc;
+  box-shadow: 0 0 8px #38bdf8;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.fusion-camera-plan__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 8px;
+}
+
+.fusion-camera-plan__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  color: #94a3b8;
+}
+
+.fusion-camera-plan__legend-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 520px) {
+  .fusion-dock-btn__label {
+    display: none;
+  }
+
+  .fusion-dock-btn {
+    padding: 4px 7px;
+    min-width: 28px;
+    justify-content: center;
+  }
+}
+
 /* Fusión: notebook / pantallas chicas — transporte arriba; vista grande limitada en alto; miniaturas al costado en desktop */
 .fusion-workspace {
   display: flex;
   flex-direction: column;
   gap: 10px;
   width: 100%;
+}
+
+.fusion-workspace-top {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.fusion-program-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Vista grande + miniaturas al costado (desktop). */
+.fusion-stage {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* Fila programa + miniaturas: misma altura que el canvas (no el bloque de export debajo). */
+.fusion-preview-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.fusion-preview-column {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
 .fusion-main-flow {
@@ -118,32 +788,315 @@ button:not(:disabled) {
 }
 
 /* Fuentes ISO para drawImage: fuera del viewport para no apilar <video> encima del canvas (evita doble imagen / bandas raras al costado). */
+/* Decoders ocultos: sin recortar a 16:9 (el frame completo alimenta drawImage). */
+/* Tamaño real off-screen: Chromium no decodifica bien vídeos de 4×4 px (captura queda “congelada”). */
 .fusion-video-decoders {
-  position: absolute;
-  left: -12000px;
+  position: fixed;
+  left: 0;
   top: 0;
-  width: 1280px;
-  height: 720px;
+  width: 960px;
+  height: 540px;
+  transform: translateX(-12000px);
   overflow: hidden;
-  opacity: 0;
+  opacity: 0.01;
   pointer-events: none;
-  z-index: 0;
+  z-index: -1;
+}
+
+.fusion-video-decoders video {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 960px;
+  height: 540px;
+  max-width: none;
+  max-height: none;
+  object-fit: contain;
+}
+
+/* Programa: canvas al centro; escenas y herramientas en columnas laterales (no sobre el vídeo). */
+.fusion-program-layout {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+  max-width: 100%;
+  margin: 0 auto;
+}
+
+.fusion-program-rail {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: flex-start;
+  min-height: 0;
+}
+
+.fusion-program-rail--left,
+.fusion-program-rail--right {
+  width: 84px;
+}
+
+.fusion-scene-switcher {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.94);
+  border: 1px solid #1e293b;
+  overflow-y: auto;
+  overflow-x: hidden;
+  max-height: min(88vh, 720px);
+  pointer-events: auto;
+}
+
+.fusion-scene-switcher-label {
+  font-size: 8px;
+  color: #94a3b8;
+  text-align: center;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  line-height: 1;
+  margin: 0 0 2px;
+}
+
+.fusion-scene-switcher-btn {
+  padding: 4px 6px;
+  border-radius: 6;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 11px;
+  font-weight: 600;
+  min-width: 0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  line-height: 1.1;
+}
+
+.fusion-scene-switcher-btn--active {
+  border: 2px solid #38bdf8;
+  background: #0c4a6e;
+  font-weight: 700;
+}
+
+.fusion-scene-switcher-btn-sub {
+  font-size: 8px;
+  color: #64748b;
+}
+
+.fusion-scene-switcher-btn--active .fusion-scene-switcher-btn-sub {
+  color: #bae6fd;
+}
+
+.fusion-scene-switcher-config {
+  position: relative;
+  padding: 4px 0;
+  border-radius: 6;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #cbd5e1;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fusion-program-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  padding: 6px;
+  border-radius: 10px;
+  background: rgba(2, 6, 23, 0.94);
+  border: 1px solid #1e293b;
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+
+.fusion-program-tool-block {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  padding: 5px;
+  border-radius: 8px;
+  border: 1px solid #1e293b;
+  background: rgba(15, 23, 42, 0.55);
+  font-size: 11px;
+  color: #e2e8f0;
+  box-sizing: border-box;
+}
+
+.fusion-program-tool-block--crop-active {
+  border-color: #38bdf8;
+}
+
+.fusion-program-tool-label {
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 600;
+  text-align: center;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  line-height: 1.1;
+}
+
+.fusion-program-tool-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+}
+
+.fusion-program-tool-actions button {
+  width: 100%;
+  padding: 4px 4px;
+  border-radius: 6;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #cbd5e1;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+.fusion-program-tool-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.fusion-program-tool-zoom-value {
+  font-variant-numeric: tabular-nums;
+  color: #64748b;
+  font-size: 11px;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.fusion-program-tool-zoom-value--active {
+  color: #7dd3fc;
+}
+
+.fusion-program-rail--right {
+  gap: 8px;
+}
+
+.fusion-program-tool-actions--modes {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+
+.fusion-program-tool-actions--modes button {
+  flex: 1 1 28%;
+  min-width: 0;
+  padding: 3px 2px;
+  font-size: 9px;
+}
+
+.fusion-program-tool-btn--active {
+  border-color: #38bdf8 !important;
+  color: #e0f2fe !important;
+  background: #0c4a6e !important;
+}
+
+.fusion-program-bg-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+}
+
+.fusion-program-bg-color-input {
+  width: 100%;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  cursor: pointer;
+  background: transparent;
+}
+
+.fusion-program-bg-presets {
+  display: flex;
+  gap: 4px;
+  justify-content: center;
+}
+
+.fusion-program-bg-preset {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid #475569;
+  cursor: pointer;
+}
+
+.fusion-program-bg-select {
+  width: 100%;
+  padding: 3px 2px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #cbd5e1;
+  font-size: 9px;
+  max-width: 100%;
+}
+
+.fusion-program-notice {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: 8;
+  background: rgba(2, 6, 23, 0.92);
+  border: 1px solid #7c2d12;
+  color: #fed7aa;
+  font-size: 10px;
+  font-weight: 700;
+  text-align: center;
+  max-width: 100%;
 }
 
 .fusion-preview-box {
   position: relative;
+  flex: 0 1 auto;
   width: 100%;
-  max-width: 960px;
-  margin: 0 auto;
-  aspect-ratio: 16 / 9;
-  max-height: min(44vh, 440px);
+  min-width: 0;
+  margin: 0;
+  /* aspect-ratio lo define el inline según orientación de salida (no fijar 16:9 acá). */
   border-radius: 10px;
   border: 1px solid #1e293b;
   background: #020617;
   overflow: hidden;
 }
 
-/* El canvas no debe usar width/height 100% del cuadro (estira el bitmap); centrado + máximos preservan 16:9. */
+.fusion-preview-box--landscape {
+  max-width: min(100%, 760px);
+}
+
+.fusion-preview-box--portrait {
+  max-width: min(100%, 380px);
+  max-height: min(80vh, 820px);
+}
+
+.fusion-preview-box--square {
+  max-width: min(100%, 520px);
+  max-height: min(62vh, 520px);
+}
+
+/* Ocupa todo el cuadro; el canvas va centrado dentro sin desbordar. */
 .fusion-preview-inner {
   position: absolute;
   inset: 0;
@@ -151,16 +1104,24 @@ button:not(:disabled) {
   align-items: center;
   justify-content: center;
   background: #020617;
+  min-height: 0;
 }
 
-.fusion-preview-inner canvas {
+/* Ajusta al canvas mostrado (letterbox + overlay de recorte). */
+.fusion-preview-canvas-wrap {
+  position: relative;
+  max-width: 100%;
+  max-height: 100%;
+  line-height: 0;
+}
+
+.fusion-preview-canvas-wrap canvas {
   display: block;
   max-width: 100%;
   max-height: 100%;
   width: auto;
   height: auto;
-  aspect-ratio: 16 / 9;
-  object-fit: contain;
+  vertical-align: top;
 }
 
 .fusion-thumb-strip {
@@ -174,6 +1135,98 @@ button:not(:disabled) {
   -webkit-overflow-scrolling: touch;
 }
 
+.fusion-thumb-card {
+  width: 100%;
+  max-width: 200px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 10px;
+  box-sizing: border-box;
+  background: #0c121c;
+}
+
+.fusion-thumb-card--on-air-manual {
+  border: 3px solid #2dd4bf;
+  background: #0f2438;
+}
+
+.fusion-thumb-card--on-air-auto {
+  border: 3px solid #a78bfa;
+  background: #3b0764;
+}
+
+.fusion-thumb-card--idle {
+  border: 1px solid #334155;
+}
+
+.fusion-thumb-preview-wrap {
+  position: relative;
+  width: 100%;
+}
+
+.fusion-thumb-pick {
+  display: block;
+  width: 100%;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #020617;
+  cursor: pointer;
+}
+
+.fusion-thumb-pick:disabled {
+  cursor: not-allowed;
+  opacity: 0.93;
+}
+
+.fusion-thumb-pick-video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  display: block;
+}
+
+.fusion-thumb-overlay-btn {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  cursor: pointer;
+  line-height: 1;
+  font-size: 12px;
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+.fusion-thumb-overlay-btn:hover {
+  filter: brightness(1.12);
+}
+
+.fusion-thumb-close {
+  top: 4px;
+  right: 4px;
+  background: rgba(60, 10, 10, 0.88);
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.45);
+}
+
+.fusion-thumb-rotate {
+  top: 4px;
+  left: 4px;
+  background: rgba(15, 23, 42, 0.88);
+  color: #e2e8f0;
+}
+
 .fusion-sidebar {
   display: flex;
   flex-direction: column;
@@ -182,26 +1235,79 @@ button:not(:disabled) {
 }
 
 @media (min-width: 920px) {
-  .fusion-workspace {
+  .fusion-program-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 200px;
+    column-gap: 12px;
+    align-items: end;
+  }
+
+  .fusion-program-heading-sources {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+    letter-spacing: 0.04;
+    margin: 0 0 2px;
+    padding: 0 4px 0 0;
+  }
+
+  .fusion-sidebar-sources--mobile {
+    display: none;
+  }
+
+  .fusion-preview-row {
     flex-direction: row;
     align-items: stretch;
+    gap: 12px;
+  }
+
+  .fusion-main-flow {
+    flex: 1;
+    min-width: 0;
   }
 
   .fusion-sidebar {
     width: 200px;
     flex-shrink: 0;
-    max-height: min(72vh, 720px);
-    overflow-x: hidden;
-    overflow-y: auto;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
     padding-right: 4px;
   }
 
   .fusion-thumb-strip {
+    flex: 1;
+    min-height: 0;
     flex-direction: column;
     overflow-x: hidden;
     overflow-y: auto;
-    max-height: min(72vh, 720px);
     padding: 0 4px 8px 0;
+  }
+}
+
+@media (max-width: 919px) {
+  .fusion-program-layout {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .fusion-program-rail--left,
+  .fusion-program-rail--right {
+    width: 100%;
+    max-width: min(100%, 420px);
+  }
+
+  .fusion-scene-switcher {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-height: none;
+  }
+
+  .fusion-program-heading-sources {
+    display: none;
   }
 }
 

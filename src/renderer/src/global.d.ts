@@ -14,6 +14,8 @@ declare global {
       sendSig: (raw: string) => Promise<boolean>
       pickOutputDir: () => Promise<string | null>
       pickFusionFiles: () => Promise<string[] | null>
+      pickImageFile: () => Promise<string | null>
+      readImageDataUrl: (absPath: string) => Promise<string | null>
       pathToFileUrl: (absPath: string) => Promise<string | null>
       saveVideo: (filePath: string, data: ArrayBuffer) => Promise<boolean>
       saveFusionMp4: (
@@ -26,6 +28,15 @@ declare global {
       ) => Promise<{ ok: true; destDir: string } | { ok: false; message: string }>
       copyText: (text: string) => Promise<boolean>
       exportCert: () => Promise<boolean>
+      minimizeMainWindow: () => Promise<boolean>
+      listDisplaySources: () => Promise<
+        Array<{
+          id: string
+          name: string
+          thumbnailDataUrl: string
+          kind: 'screen' | 'window'
+        }>
+      >
     }
   }
 }

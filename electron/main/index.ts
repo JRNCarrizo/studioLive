@@ -2,7 +2,17 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readdir, readFile, stat, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { BrowserWindow, app, clipboard, dialog, ipcMain, net, protocol, session } from 'electron'
+import {
+  BrowserWindow,
+  app,
+  clipboard,
+  desktopCapturer,
+  dialog,
+  ipcMain,
+  net,
+  protocol,
+  session
+} from 'electron'
 import {
   HOST_PANEL_HTTP_OFFSET,
   cameraClientDir,
@@ -72,7 +82,9 @@ function createWindow(): void {
       preload: path.join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      allowRunningInsecureContent: viteDev
+      allowRunningInsecureContent: viteDev,
+      /** Evita que <video> ocultos dejen de decodificar cuando la ventana pierde foco. */
+      backgroundThrottling: false
     }
   })
 
@@ -139,6 +151,43 @@ ipcMain.handle('studio:pick-output-dir', async () => {
 })
 
 /** Selección múltiple de WebM exportados por Studio Live (cam-*, audio-*). */
+ipcMain.handle('studio:pick-image-file', async () => {
+  const r = await dialog.showOpenDialog(dialogParentWindow(), {
+    title: 'Imagen de fondo del programa',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Imágenes', extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'] },
+      { name: 'Todos los archivos', extensions: ['*'] }
+    ]
+  })
+  if (r.canceled || !r.filePaths[0]) return null
+  return r.filePaths[0]
+})
+
+const IMAGE_MIME: Record<string, string> = {
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.png': 'image/png',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.bmp': 'image/bmp'
+}
+
+/** Data URL para `<img>` / canvas (más fiable que studio-webm:// con imágenes). */
+ipcMain.handle('studio:read-image-data-url', async (_evt, absPath: unknown) => {
+  if (typeof absPath !== 'string' || !path.isAbsolute(absPath)) return null
+  try {
+    const st = await stat(absPath)
+    if (!st.isFile() || st.size > 25 * 1024 * 1024) return null
+    const ext = path.extname(absPath).toLowerCase()
+    const mime = IMAGE_MIME[ext] ?? 'image/png'
+    const buf = await readFile(absPath)
+    return `data:${mime};base64,${buf.toString('base64')}`
+  } catch {
+    return null
+  }
+})
+
 ipcMain.handle('studio:pick-fusion-files', async () => {
   const r = await dialog.showOpenDialog(dialogParentWindow(), {
     title: 'Pistas ISO para fusión',
@@ -272,6 +321,25 @@ ipcMain.handle(
   }
 )
 
+ipcMain.handle('studio:minimize-main-window', () => {
+  mainWindow?.minimize()
+  return true
+})
+
+ipcMain.handle('studio:list-display-sources', async () => {
+  const sources = await desktopCapturer.getSources({
+    types: ['screen', 'window'],
+    thumbnailSize: { width: 320, height: 180 },
+    fetchWindowIcons: true
+  })
+  return sources.map((s) => ({
+    id: s.id,
+    name: s.name,
+    thumbnailDataUrl: s.thumbnail.toDataURL(),
+    kind: s.id.startsWith('screen:') ? ('screen' as const) : ('window' as const)
+  }))
+})
+
 ipcMain.handle('studio:copy-text', (_evt, text: string) => {
   clipboard.writeText(text)
   return true
@@ -313,7 +381,7 @@ app.whenReady().then(async () => {
   })
 
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(permission === 'media')
+    callback(permission === 'media' || permission === 'display-capture')
   })
 
   session.defaultSession.setCertificateVerifyProc((request, callback) => {

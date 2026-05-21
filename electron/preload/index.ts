@@ -19,6 +19,9 @@ contextBridge.exposeInMainWorld('studio', {
     ipcRenderer.invoke('studio:pick-output-dir'),
   pickFusionFiles: (): Promise<string[] | null> =>
     ipcRenderer.invoke('studio:pick-fusion-files'),
+  pickImageFile: (): Promise<string | null> => ipcRenderer.invoke('studio:pick-image-file'),
+  readImageDataUrl: (absPath: string): Promise<string | null> =>
+    ipcRenderer.invoke('studio:read-image-data-url', absPath),
   pathToFileUrl: (absPath: string): Promise<string | null> =>
     ipcRenderer.invoke('studio:path-to-file-url', absPath),
   saveVideo: (filePath: string, data: ArrayBuffer): Promise<boolean> =>
@@ -35,5 +38,14 @@ contextBridge.exposeInMainWorld('studio', {
     ipcRenderer.invoke('studio:prepare-recording-folder', { parentDir, folderName }),
   copyText: (text: string): Promise<boolean> =>
     ipcRenderer.invoke('studio:copy-text', text),
-  exportCert: (): Promise<boolean> => ipcRenderer.invoke('studio:export-cert')
+  exportCert: (): Promise<boolean> => ipcRenderer.invoke('studio:export-cert'),
+  minimizeMainWindow: (): Promise<boolean> => ipcRenderer.invoke('studio:minimize-main-window'),
+  listDisplaySources: (): Promise<
+    Array<{
+      id: string
+      name: string
+      thumbnailDataUrl: string
+      kind: 'screen' | 'window'
+    }>
+  > => ipcRenderer.invoke('studio:list-display-sources')
 })
