@@ -176,7 +176,7 @@ export function FusionStudioTransport(props: FusionStudioTransportProps) {
     >
       <div
         className="fusion-dock-transport__toolbar"
-        onMouseDown={floating ? GLYPH.floatOn : GLYPH.floatOff}
+        onMouseDown={floating ? (e) => startDrag(e) : undefined}
         title={floating ? 'Arrastrá para mover' : undefined}
       >
         <div className="fusion-dock-transport__toolbar-left">
@@ -223,7 +223,7 @@ export function FusionStudioTransport(props: FusionStudioTransportProps) {
                     : 'Reproducir'
               }
             >
-              {playing ? GLYPH.pause : GLYPH.play}
+              <span aria-hidden>{playing ? GLYPH.pause : GLYPH.play}</span>
               <span className="fusion-dock-btn__label">{playing ? 'Pausar' : 'Play'}</span>
             </button>
           ) : null}
@@ -248,8 +248,7 @@ export function FusionStudioTransport(props: FusionStudioTransportProps) {
                     : 'Grabar mezcla'
               }
             >
-              {GLYPH.record}
-              {GLYPH.record}
+              <span aria-hidden>{GLYPH.record}</span>
               <span className="fusion-dock-btn__label">Grabar</span>
             </button>
           ) : null}
@@ -264,8 +263,7 @@ export function FusionStudioTransport(props: FusionStudioTransportProps) {
                     onClick={props.onResume}
                     title="Sigue grabando en la misma toma"
                   >
-                    {GLYPH.play}
-                    {GLYPH.play}
+                    <span aria-hidden>{GLYPH.play}</span>
                     <span className="fusion-dock-btn__label">Seguir</span>
                   </button>
                 ) : (
@@ -275,8 +273,7 @@ export function FusionStudioTransport(props: FusionStudioTransportProps) {
                     onClick={props.onPause}
                     title="Pausa todas las pistas (misma sesión)"
                   >
-                    {GLYPH.pause}
-                    {GLYPH.pause}
+                    <span aria-hidden>{GLYPH.pause}</span>
                     <span className="fusion-dock-btn__label">Pausa</span>
                   </button>
                 )
@@ -290,8 +287,7 @@ export function FusionStudioTransport(props: FusionStudioTransportProps) {
                     onClick={props.onRecordResume}
                     title="Seguir grabando"
                   >
-                    {GLYPH.play}
-                    {GLYPH.play}
+                    <span aria-hidden>{GLYPH.play}</span>
                     <span className="fusion-dock-btn__label">Seguir</span>
                   </button>
                 ) : (
@@ -301,8 +297,7 @@ export function FusionStudioTransport(props: FusionStudioTransportProps) {
                     onClick={props.onRecordPause}
                     title="Pausar grabación"
                   >
-                    {GLYPH.pause}
-                    {GLYPH.pause}
+                    <span aria-hidden>{GLYPH.pause}</span>
                     <span className="fusion-dock-btn__label">Pausa</span>
                   </button>
                 )
@@ -314,8 +309,7 @@ export function FusionStudioTransport(props: FusionStudioTransportProps) {
                 onClick={isIso ? props.onStop : props.onRecordStop}
                 title="Finalizar grabación"
               >
-                {GLYPH.stop}
-                {GLYPH.stop}
+                <span aria-hidden>{GLYPH.stop}</span>
                 <span className="fusion-dock-btn__label">Fin</span>
               </button>
             </>

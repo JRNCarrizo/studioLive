@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- CSP explícita: reduce avisos del sandbox de Electron (warnAboutInsecureCSP). En dev, Vite necesita unsafe-eval para HMR. -->
+    <!-- CSP: en dev Vite añade unsafe-eval (HMR); en build empaquetado se quita (ver studio-csp-packaged en electron.vite.config). -->
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' http: https: ws: wss:; media-src 'self' blob: studio-webm:; img-src 'self' data: blob:; font-src 'self' data:;"

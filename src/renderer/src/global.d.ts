@@ -8,6 +8,8 @@ declare global {
         loopbackSignalingPort: number
         hostPanelHttpPort: number
         ips: string[]
+        platform: string
+        hwAccelDisabled: boolean
       }>
       drainSigMsgs: (max?: number) => Promise<string[]>
       isSigReady: () => Promise<boolean>
@@ -29,6 +31,9 @@ declare global {
       copyText: (text: string) => Promise<boolean>
       exportCert: () => Promise<boolean>
       minimizeMainWindow: () => Promise<boolean>
+      isExcludeFromCaptureSupported: () => Promise<boolean>
+      setExcludeFromCapture: (enabled: boolean) => Promise<{ ok: boolean; supported: boolean }>
+      setPendingDisplaySource: (sourceId: string) => Promise<boolean>
       listDisplaySources: () => Promise<
         Array<{
           id: string

@@ -6,6 +6,8 @@ export type StudioInfo = {
   /** HTTP 127.0.0.1 — fetch pull/push sin IPC */
   hostPanelHttpPort: number
   ips: string[]
+  platform: NodeJS.Platform
+  hwAccelDisabled: boolean
 }
 
 contextBridge.exposeInMainWorld('studio', {
@@ -40,6 +42,14 @@ contextBridge.exposeInMainWorld('studio', {
     ipcRenderer.invoke('studio:copy-text', text),
   exportCert: (): Promise<boolean> => ipcRenderer.invoke('studio:export-cert'),
   minimizeMainWindow: (): Promise<boolean> => ipcRenderer.invoke('studio:minimize-main-window'),
+  isExcludeFromCaptureSupported: (): Promise<boolean> =>
+    ipcRenderer.invoke('studio:is-exclude-from-capture-supported'),
+  setExcludeFromCapture: (
+    enabled: boolean
+  ): Promise<{ ok: boolean; supported: boolean }> =>
+    ipcRenderer.invoke('studio:set-exclude-from-capture', enabled),
+  setPendingDisplaySource: (sourceId: string): Promise<boolean> =>
+    ipcRenderer.invoke('studio:set-pending-display-source', sourceId),
   listDisplaySources: (): Promise<
     Array<{
       id: string

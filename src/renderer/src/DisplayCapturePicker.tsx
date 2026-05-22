@@ -1,18 +1,40 @@
 import { useEffect, useState } from 'react'
 
 import type { DisplaySourceOption } from './displayCapture'
+import { YOUTUBE_CAPTURE_CHECKLIST } from './youtubeCaptureHelp'
 import { btnNeutral } from './workspaceChrome'
 
 type Props = {
   open: boolean
   onClose: () => void
   onPick: (sourceId: string) => void
+  excludeFromCaptureSupported?: boolean
+  excludeFromCapture?: boolean
+  onExcludeFromCaptureChange?: (enabled: boolean) => void
 }
 
-export function DisplayCapturePicker({ open, onClose, onPick }: Props) {
+export function DisplayCapturePicker({
+  open,
+  onClose,
+  onPick,
+  excludeFromCaptureSupported = false,
+  excludeFromCapture = false,
+  onExcludeFromCaptureChange
+}: Props) {
   const [sources, setSources] = useState<DisplaySourceOption[]>([])
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  /** Por defecto solo monitores: las ventanas de navegador suelen quedar congeladas con YouTube. */
+  const [showWindows, setShowWindows] = useState(false)
+
+  const canExcludeFromCapture =
+    excludeFromCaptureSupported ||
+    Boolean(
+      onExcludeFromCaptureChange &&
+        window.studio?.setExcludeFromCapture &&
+        typeof navigator !== 'undefined' &&
+        /Windows|Mac/i.test(navigator.userAgent)
+    )
 
   useEffect(() => {
     if (!open) return
@@ -82,21 +104,40 @@ export function DisplayCapturePicker({ open, onClose, onPick }: Props) {
         <p style={{ fontSize: 12, color: '#94a3b8', marginBottom: 10, lineHeight: 1.5 }}>
           Elegí qué compartir desde esta PC. Evitá la ventana de Studio Live para no ver un efecto espejo.
         </p>
-        <p
-          style={{
-            fontSize: 11,
-            color: '#bae6fd',
-            marginBottom: 10,
-            lineHeight: 1.5,
-            padding: '8px 10px',
-            borderRadius: 8,
-            border: '1px solid #0369a1',
-            background: 'rgba(12, 74, 110, 0.35)'
-          }}
-        >
-          <strong style={{ color: '#e0f2fe' }}>Un solo monitor:</strong> después de elegir la pantalla, minimizá
-          Studio Live desde la barra de tareas para que no tape el tutorial. La captura y la grabación siguen activas.
-        </p>
+        {canExcludeFromCapture ? (
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 10,
+              marginBottom: 12,
+              padding: '10px 12px',
+              borderRadius: 8,
+              border: excludeFromCapture ? '1px solid #0d9488' : '1px solid #334155',
+              background: excludeFromCapture ? 'rgba(19, 78, 74, 0.45)' : 'rgba(15, 23, 42, 0.8)',
+              cursor: 'pointer',
+              fontSize: 12,
+              lineHeight: 1.45,
+              color: '#e2e8f0'
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={excludeFromCapture}
+              onChange={(e) => onExcludeFromCaptureChange?.(e.target.checked)}
+              style={{ marginTop: 3, flexShrink: 0, accentColor: '#14b8a6' }}
+            />
+            <span>
+              <strong style={{ color: excludeFromCapture ? '#99f6e4' : '#cbd5e1' }}>
+                Ocultar Studio Live en la captura
+              </strong>
+              <span style={{ display: 'block', marginTop: 4, color: '#94a3b8', fontSize: 11 }}>
+                Recomendado al grabar el monitor: vos seguís viendo y controlando la app, pero no sale en la grabación.
+                Al elegir una pantalla se activa solo.
+              </span>
+            </span>
+          </label>
+        ) : null}
         <p
           style={{
             fontSize: 11,
@@ -109,10 +150,53 @@ export function DisplayCapturePicker({ open, onClose, onPick }: Props) {
             background: 'rgba(120, 53, 15, 0.25)'
           }}
         >
-          <strong style={{ color: '#fde68a' }}>YouTube o vídeo en el navegador:</strong> elegí la{' '}
-          <strong>pantalla completa</strong> (monitor), no la ventana del navegador. En ventana el vídeo suele
-          quedar quieto por la aceleración de hardware de Chrome/Edge.
+          <strong style={{ color: '#fde68a' }}>YouTube / streaming:</strong> usá «Solo pantallas» (monitor). «Ocultar
+          en captura» no arregla el congelado — es límite del navegador.
         </p>
+        <ol
+          style={{
+            fontSize: 11,
+            color: '#cbd5e1',
+            margin: '0 0 14px',
+            paddingLeft: 20,
+            lineHeight: 1.55
+          }}
+        >
+          {YOUTUBE_CAPTURE_CHECKLIST.map((line) => (
+            <li key={line} style={{ marginBottom: 4 }}>
+              {line}
+            </li>
+          ))}
+        </ol>
+
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => setShowWindows(false)}
+            style={{
+              ...btnNeutral,
+              fontWeight: !showWindows ? 700 : 500,
+              border: !showWindows ? '2px solid #10b981' : '1px solid #334155',
+              background: !showWindows ? '#064e3b' : '#0f172a',
+              color: !showWindows ? '#a7f3d0' : '#94a3b8'
+            }}
+          >
+            Solo pantallas
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowWindows(true)}
+            style={{
+              ...btnNeutral,
+              fontWeight: showWindows ? 700 : 500,
+              border: showWindows ? '2px solid #f59e0b' : '1px solid #334155',
+              background: showWindows ? '#78350f' : '#0f172a',
+              color: showWindows ? '#fde68a' : '#94a3b8'
+            }}
+          >
+            Mostrar ventanas (YouTube suele fallar)
+          </button>
+        </div>
 
         {loading ? <p style={{ fontSize: 13, color: '#64748b' }}>Buscando fuentes…</p> : null}
         {err ? <p style={{ fontSize: 13, color: '#fca5a5', marginBottom: 12 }}>{err}</p> : null}
@@ -124,7 +208,9 @@ export function DisplayCapturePicker({ open, onClose, onPick }: Props) {
             gap: 10
           }}
         >
-          {sources.map((s) => (
+          {sources
+            .filter((s) => showWindows || s.kind === 'screen')
+            .map((s) => (
             <button
               key={s.id}
               type="button"

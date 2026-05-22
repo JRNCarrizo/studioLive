@@ -1013,6 +1013,380 @@ button:not(:disabled) {
   background: #0c4a6e !important;
 }
 
+.fusion-program-tools--motion {
+  margin-top: 4px;
+}
+
+.fusion-program-tools--motion-embedded {
+  margin-top: 0;
+}
+
+.fusion-program-tools--motion-embedded .fusion-program-tool-block {
+  gap: 6px;
+}
+
+.fusion-motion-trigger {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 4px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #cbd5e1;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s;
+}
+
+.fusion-motion-trigger:hover:not(:disabled) {
+  border-color: #38bdf8;
+  color: #e0f2fe;
+  background: #0c4a6e;
+}
+
+.fusion-motion-trigger--on {
+  border-color: #38bdf8 !important;
+  background: #0c4a6e !important;
+  color: #e0f2fe !important;
+}
+
+.fusion-motion-trigger--playing .fusion-motion-trigger__icon {
+  animation: fusion-motion-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes fusion-motion-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.fusion-motion-trigger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.fusion-motion-trigger__icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.fusion-motion-trigger__label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.fusion-float-motion {
+  position: fixed;
+  z-index: 64;
+  width: 200px;
+  max-width: calc(100vw - 16px);
+  border-radius: 12px;
+  border: 1px solid #334155;
+  background: #0b1220;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  color: #e2e8f0;
+  overflow: hidden;
+}
+
+.fusion-float-motion--collapsed {
+  width: auto;
+  min-width: 168px;
+}
+
+.fusion-float-motion__chrome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+  cursor: grab;
+  user-select: none;
+}
+
+.fusion-float-motion--collapsed .fusion-float-motion__chrome {
+  border-bottom: none;
+}
+
+.fusion-float-motion__chrome-btn {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px;
+}
+
+.fusion-float-motion__title {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.fusion-float-motion__badge {
+  font-size: 9px;
+  font-weight: 700;
+  color: #7dd3fc;
+  margin-left: 4px;
+}
+
+.fusion-float-motion__badge--inline {
+  display: inline;
+}
+
+.fusion-float-motion__chrome-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.fusion-float-motion__body {
+  padding: 8px;
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+}
+
+.fusion-program-motion-status {
+  display: block;
+  font-size: 9px;
+  font-weight: 600;
+  color: #7dd3fc;
+  margin-bottom: 4px;
+}
+
+.fusion-program-motion-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  width: 100%;
+}
+
+.fusion-program-motion-btn {
+  padding: 4px 2px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #cbd5e1;
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.fusion-program-motion-btn:hover:not(:disabled) {
+  border-color: #38bdf8;
+  color: #e0f2fe;
+}
+
+.fusion-program-motion-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.fusion-program-motion-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+  width: 100%;
+}
+
+.fusion-program-motion-slider {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  gap: 2px 6px;
+  align-items: center;
+  font-size: 9px;
+  color: #94a3b8;
+}
+
+.fusion-program-motion-slider > span:first-child {
+  grid-column: 1;
+  grid-row: 1;
+  font-weight: 600;
+}
+
+.fusion-program-motion-slider input[type='range'] {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  width: 100%;
+  height: 4px;
+  margin: 0;
+  accent-color: #38bdf8;
+}
+
+.fusion-program-motion-slider-val {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: 8px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.fusion-program-motion-custom {
+  margin-top: 6px;
+  width: 100%;
+}
+
+.fusion-program-motion-custom-label {
+  display: block;
+  font-size: 8px;
+  font-weight: 600;
+  color: #64748b;
+  margin-bottom: 4px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.fusion-program-motion-custom-list {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.fusion-program-motion-custom-row {
+  display: flex;
+  gap: 3px;
+  align-items: stretch;
+}
+
+.fusion-program-motion-btn--custom {
+  flex: 1;
+  min-width: 0;
+}
+
+.fusion-program-motion-icon-btn {
+  flex: 0 0 auto;
+  width: 22px;
+  padding: 0;
+  border-radius: 4px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.fusion-program-motion-icon-btn:hover:not(:disabled) {
+  border-color: #38bdf8;
+  color: #e0f2fe;
+}
+
+.fusion-program-motion-icon-btn--danger:hover:not(:disabled) {
+  border-color: #f87171;
+  color: #fecaca;
+}
+
+.fusion-program-tool-actions--motion {
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.fusion-motion-dialog,
+.studio-inline-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  margin-bottom: 6px;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #0f172a;
+}
+
+.fusion-motion-dialog__label,
+.studio-inline-dialog__label {
+  font-size: 9px;
+  font-weight: 600;
+  color: #94a3b8;
+}
+
+.fusion-motion-dialog__input,
+.studio-inline-dialog__input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #475569;
+  background: #020617;
+  color: #e2e8f0;
+  font-size: 11px;
+}
+
+.fusion-motion-dialog__input:focus,
+.studio-inline-dialog__input:focus {
+  outline: none;
+  border-color: #38bdf8;
+}
+
+.fusion-motion-dialog__confirm,
+.studio-inline-dialog__confirm {
+  margin: 0;
+  font-size: 10px;
+  color: #cbd5e1;
+  line-height: 1.35;
+}
+
+.fusion-motion-dialog__actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.fusion-motion-dialog__actions button,
+.studio-inline-dialog__actions button {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fusion-motion-dialog__actions button:hover:not(:disabled),
+.studio-inline-dialog__actions button:hover:not(:disabled) {
+  border-color: #38bdf8;
+}
+
+.fusion-motion-dialog__cancel,
+.studio-inline-dialog__cancel {
+  color: #94a3b8 !important;
+}
+
+.fusion-motion-dialog__danger,
+.studio-inline-dialog__danger {
+  border-color: #7f1d1d !important;
+  background: #450a0a !important;
+  color: #fecaca !important;
+}
+
+.fusion-motion-dialog__danger:hover:not(:disabled),
+.studio-inline-dialog__danger:hover:not(:disabled) {
+  border-color: #f87171 !important;
+}
+
 .fusion-program-bg-panel {
   display: flex;
   flex-direction: column;
@@ -1365,5 +1739,112 @@ button:not(:disabled) {
 .fusion-export-preview-video::-webkit-media-controls-fullscreen-button,
 .fusion-export-preview-video::-webkit-media-controls-overflow-button,
 .fusion-export-preview-video::-webkit-media-controls-picture-in-picture-button {
+  display: none !important;
+}
+
+/* Vista previa ISO post-grabación: maximizar (CSS; fiable en Electron) */
+.iso-preview-wrap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.iso-preview-wrap:fullscreen,
+.iso-preview-wrap--expanded {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 100002 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  box-sizing: border-box !important;
+  padding: 12px !important;
+  margin: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  max-width: none !important;
+  background: #020617 !important;
+}
+
+.iso-preview-wrap:fullscreen .iso-preview-video,
+.iso-preview-wrap--expanded .iso-preview-video {
+  max-height: calc(100vh - 48px) !important;
+  max-width: calc(100vw - 24px) !important;
+  width: auto !important;
+  height: auto !important;
+  object-fit: contain;
+}
+
+.iso-preview-fs-exit-hint {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 6;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.45);
+  background: rgba(15, 23, 42, 0.9);
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.iso-preview-fs-exit-hint:hover {
+  background: rgba(30, 41, 59, 0.95);
+}
+
+/* Reemplaza el botón nativo (roto en Electron); misma zona que [⛶] junto al menú ⋮ */
+.iso-preview-fs-btn {
+  position: absolute;
+  right: 46px;
+  bottom: 3px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 30px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 2px;
+  background: transparent;
+  color: #f8fafc;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.iso-preview-fs-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.iso-preview-fs-btn svg {
+  width: 20px;
+  height: 20px;
+  opacity: 0.95;
+}
+
+.iso-preview-wrap--expanded .iso-preview-fs-btn {
+  right: 14px;
+  bottom: 14px;
+}
+
+.iso-preview-video {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  max-height: 196px;
+  object-fit: contain;
+  outline: none;
+}
+
+/* Ocultar el fullscreen roto del menú nativo si el navegador lo ignora en controlsList */
+.iso-preview-video::-webkit-media-controls-fullscreen-button {
   display: none !important;
 }

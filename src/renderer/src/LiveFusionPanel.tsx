@@ -4,7 +4,11 @@ import { useCameraAliases } from './cameraAliases'
 import { configureDisplayCaptureVideoTrack, isDisplayCaptureId } from './displayCapture'
 import { ProgramCropOverlay } from './ProgramCropOverlay'
 import { FusionProgramBackgroundTools } from './FusionProgramBackgroundTools'
+import { FloatingMotionPanel, FusionMotionTrigger } from './FloatingMotionPanel'
+import { StudioConfirmForm } from './StudioInlineDialog'
 import { FusionProgramTools } from './FusionProgramTools'
+import { loadFramingMotionSettings } from './framingMotionPresetsStorage'
+import { useFramingMotion } from './useFramingMotion'
 import { drawProgramBackground, resetProgramCanvas } from './programBackground'
 import { useProgramBackground } from './useProgramBackground'
 import { FusionSceneSwitcher } from './FusionSceneSwitcher'
@@ -28,7 +32,13 @@ import {
 } from './programCrop'
 import { getVideoFrameSize, getVideoFrameSizeForProgram } from './videoFrameSize'
 import { useProgramFramingGestures } from './useProgramFramingGestures'
-import { clampFraming, FRAMING_NEUTRAL, type CamFraming } from './programFraming'
+import {
+  clampFraming,
+  FRAMING_LERP_K,
+  FRAMING_NEUTRAL,
+  lerpFraming,
+  type CamFraming
+} from './programFraming'
 
 /** Centrado por defecto en Fusión en vivo (calibrado vs. miniaturas: un poco a la izquierda y abajo). */
 const LIVE_FRAMING_NEUTRAL: CamFraming = { zoom: 1, offsetX: 0.47, offsetY: 0.52 }
@@ -63,12 +73,9 @@ import {
 import {
   btnAudio,
   btnNeutral,
-  btnQr,
-  pathLineMuted,
-  pathTextBright,
-  warnLineNoFolder,
   workspaceActionRowLabel,
   workspaceEyebrow,
+  workspaceInnerCard,
   workspaceToolbar
 } from './workspaceChrome'
 
@@ -107,8 +114,6 @@ type LiveFusionPanelProps = {
   onStatus: (msg: string) => void
   /** ISO grabando o pendiente de guardar: no grabar programa encima. */
   isoBusy: boolean
-  /** Igual que en Sesión en vivo: diálogo para elegir carpeta de grabación. */
-  onPickOutputDir: () => void | Promise<void>
   /** Abre el popover con el QR + calidad + troubleshooting. */
   onOpenQr: () => void
   /** Abre el panel flotante de audio de PC (selector, nivel post-ganancia, fader). */
@@ -359,7 +364,6 @@ export function LiveFusionPanel({
   audioStream,
   onStatus,
   isoBusy,
-  onPickOutputDir,
   onOpenQr,
   onOpenAudio,
   hasPcAudio,
@@ -369,6 +373,8 @@ export function LiveFusionPanel({
   const { background: programBackground, backgroundRef: programBackgroundRef, setBackground: setProgramBackground } =
     useProgramBackground()
   const [mixMode, setMixMode] = useState<LiveMixMode>('manual')
+  const [motionOpen, setMotionOpen] = useState(false)
+  const [cancelFlowConfirm, setCancelFlowConfirm] = useState<'recording' | 'preview' | null>(null)
   const [programRecording, setProgramRecording] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
   /** Cuál botón está exportando (para spinner localizado y banner con detalle). */
@@ -447,6 +453,19 @@ export function LiveFusionPanel({
   const framingTargetRef = useRef<Map<string, CamFraming>>(new Map())
   const framingCurrentRef = useRef<Map<string, CamFraming>>(new Map())
   const [framingTick, setFramingTick] = useState(0)
+  const framingMotion = useFramingMotion()
+  const {
+    motionLabel: framingMotionLabel,
+    cancelMotion: cancelFramingMotion,
+    playPresetById: playFramingPresetById,
+    tickMotion: tickFramingMotion
+  } = framingMotion
+  const setFramingTargetOnly = useCallback((cameraId: string, next: CamFraming) => {
+    const clamped = clampFraming(next)
+    framingTargetRef.current.set(cameraId, clamped)
+    framingCurrentRef.current.set(cameraId, clamped)
+    setFramingTick((n) => n + 1)
+  }, [])
   const programDragRef = useRef<{ startX: number; startY: number; moved: boolean } | null>(null)
   const videoRefs = useRef<Map<string, HTMLVideoElement>>(new Map())
   const recRef = useRef<MediaRecorder | null>(null)
@@ -813,14 +832,16 @@ export function LiveFusionPanel({
           )
         } else {
           const crop = cropTargetRef.current.get(cameraId) ?? CROP_FULL
-          const framing = framingTargetRef.current.get(cameraId) ?? LIVE_FRAMING_NEUTRAL
-          framingCurrentRef.current.set(cameraId, framing)
+          const tgt = framingTargetRef.current.get(cameraId) ?? LIVE_FRAMING_NEUTRAL
+          const cur = framingCurrentRef.current.get(cameraId) ?? LIVE_FRAMING_NEUTRAL
+          const next = lerpFraming(cur, tgt, FRAMING_LERP_K)
+          framingCurrentRef.current.set(cameraId, next)
           drawCroppedFramedVideoInRect(
             target,
             v,
             rect,
             crop,
-            framing,
+            next,
             rot,
             1,
             slotFit,
@@ -843,10 +864,7 @@ export function LiveFusionPanel({
         ctx: target,
         cw,
         ch,
-        background: programBackgroundRef.current,
-        getVideo: (id) => videoRefs.current.get(id),
-        getStream: (id) => streams[id],
-        getRotateDeg: (id) => manualRotateDeg[id] ?? 0
+        background: programBackgroundRef.current
       })
       const sc = parseSceneSignature(sig)
       const rects = resolveLayoutSlotRects(sc.layoutId, cw, ch, layoutGeometryRef.current[sc.layoutId])
@@ -864,6 +882,7 @@ export function LiveFusionPanel({
     }
 
     const drawOnce = () => {
+      tickFramingMotion(setFramingTargetOnly)
       const cw = canvas.width
       const ch = canvas.height
       const targetSig = sceneSignature({
@@ -915,7 +934,7 @@ export function LiveFusionPanel({
       cancelled = true
       cancelAnimationFrame(rafId)
     }
-  }, [streams, programOrientation])
+  }, [tickFramingMotion, programOrientation, setFramingTargetOnly, streams])
 
   /**
    * Cambia la escena al aire. La firma de `scene` se vuelve la "to" del próximo crossfade.
@@ -1144,6 +1163,29 @@ export function LiveFusionPanel({
   const programRotateDeg = programCameraId ? (manualRotateDeg[programCameraId] ?? 0) : 0
   const programStream = programCameraId ? streams[programCameraId] : undefined
   const framingEditable = programLayoutId === 'single' && programCameraId != null
+
+  useEffect(() => {
+    cancelFramingMotion()
+  }, [programCameraId, cancelFramingMotion])
+
+  useEffect(() => {
+    if (!framingEditable || !programCameraId) setMotionOpen(false)
+  }, [framingEditable, programCameraId])
+
+  const playFramingMotion = useCallback(
+    (presetId: string) => {
+      if (!programCameraId) return
+      const { speed, intensity } = loadFramingMotionSettings()
+      playFramingPresetById(
+        programCameraId,
+        presetId,
+        () => framingTargetRef.current.get(programCameraId) ?? LIVE_FRAMING_NEUTRAL,
+        setFramingTargetOnly,
+        { speed, intensity, framingNeutral: LIVE_FRAMING_NEUTRAL }
+      )
+    },
+    [playFramingPresetById, programCameraId, setFramingTargetOnly]
+  )
   const layoutEditable = programLayoutId !== 'single' && mixMode === 'manual'
 
   const activeLayoutGeometry = useMemo((): NormalizedSlotRect[] => {
@@ -1186,12 +1228,26 @@ export function LiveFusionPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [programCameraId, framingTick])
 
-  const applyFraming = useCallback((cameraId: string, next: CamFraming) => {
-    const clamped = clampFraming(next)
-    framingTargetRef.current.set(cameraId, clamped)
-    framingCurrentRef.current.set(cameraId, clamped)
-    setFramingTick((n) => n + 1)
-  }, [])
+  const applyFraming = useCallback(
+    (cameraId: string, next: CamFraming) => {
+      cancelFramingMotion()
+      const clamped = clampFraming(next)
+      framingTargetRef.current.set(cameraId, clamped)
+      framingCurrentRef.current.set(cameraId, clamped)
+      setFramingTick((n) => n + 1)
+    },
+    [cancelFramingMotion]
+  )
+
+  const applyFramingGesture = useCallback(
+    (cameraId: string, next: CamFraming) => {
+      cancelFramingMotion()
+      const clamped = clampFraming(next)
+      framingTargetRef.current.set(cameraId, clamped)
+      setFramingTick((n) => n + 1)
+    },
+    [cancelFramingMotion]
+  )
 
   const updateFramingTarget = useCallback((cameraId: string, mutator: (cur: CamFraming) => CamFraming) => {
     const cur = framingTargetRef.current.get(cameraId) ?? LIVE_FRAMING_NEUTRAL
@@ -1241,7 +1297,7 @@ export function LiveFusionPanel({
     getVideo: (id) => videoRefs.current.get(id),
     getCrop: (id) => cropTargetRef.current.get(id) ?? CROP_FULL,
     getFraming: (id) => framingTargetRef.current.get(id) ?? LIVE_FRAMING_NEUTRAL,
-    applyFraming,
+    applyFramingGesture,
     rotateDeg: programRotateDeg,
     stream: programStream,
     neutralFraming: LIVE_FRAMING_NEUTRAL,
@@ -1282,9 +1338,9 @@ export function LiveFusionPanel({
         rotateDeg: programRotateDeg,
         stream: programStream
       })
-      applyFraming(programCameraId, next)
+      applyFramingGesture(programCameraId, next)
     },
-    [applyFraming, cropEditOpen, framingEditable, programCameraId, programRotateDeg, programStream]
+    [applyFramingGesture, cropEditOpen, framingEditable, programCameraId, programRotateDeg, programStream]
   )
 
   const onProgramMouseUp = useCallback(() => {
@@ -1352,7 +1408,7 @@ export function LiveFusionPanel({
       return
     }
     if (!outputDir) {
-      onStatus('Tocá «Carpeta de grabación» arriba en esta sección antes de grabar el programa.')
+      onStatus('Elegí «Carpeta de grabación» en la barra superior antes de grabar el programa.')
       return
     }
     if (!recordingReadiness.ready) {
@@ -1504,13 +1560,11 @@ export function LiveFusionPanel({
       return
     }
     if (!programRecording && !programBlob) return
+    setCancelFlowConfirm(programRecording ? 'recording' : 'preview')
+  }, [exportBusy, onStatus, programBlob, programRecording])
 
-    const msg = programRecording
-      ? '¿Cancelar la grabación del programa?\n\nSe va a descartar lo grabado en esta toma (no se genera vista previa ni se guarda nada en disco).'
-      : '¿Descartar la vista previa del programa?\n\nNo se va a guardar el WebM ni el MP4.'
-    const ok = window.confirm(msg)
-    if (!ok) return
-
+  const doCancelProgramFlow = useCallback(() => {
+    setCancelFlowConfirm(null)
     const rec = recRef.current
     if (rec && rec.state !== 'inactive') {
       try {
@@ -1534,108 +1588,153 @@ export function LiveFusionPanel({
     setOpenProgramSeg(null)
     setExportFileName('')
     onStatus('Grabación del programa cancelada (no se guardó nada).')
-  }, [exportBusy, onStatus, programBlob, programRecording])
+  }, [onStatus])
 
   const disabledProgramRec = isoBusy || !cameraIds.length
 
   return (
-    <div style={workspaceToolbar('teal')}>
-      <div style={workspaceEyebrow}>Alternativa · Fusión en vivo (graba ya mezclado, sin pistas separadas)</div>
-      <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.55, maxWidth: 880 }}>
-        <strong style={{ color: '#e2e8f0' }}>Importante:</strong> cada pestaña genera <strong style={{ color: '#e2e8f0' }}>su propio QR</strong>.
-        Para que las cámaras aparezcan acá, escaneá el QR de <em>esta</em> pestaña (Fusión en vivo) en cada celular. El QR de
-        «Sesión en vivo» no sirve para mezclar — los celulares quedan en la otra pestaña. Las miniaturas de la derecha son
-        cada transmisión; tocá una para mandarla al <strong style={{ color: '#e2e8f0' }}>Programa</strong> (centro).
-      </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-        <span style={workspaceActionRowLabel}>Carpeta y conexión</span>
-        <button
-          type="button"
-          disabled={programRecording}
-          onClick={() => void onPickOutputDir()}
-          style={{
-            ...btnNeutral,
-            fontWeight: 600,
-            cursor: programRecording ? 'not-allowed' : 'pointer',
-            opacity: programRecording ? 0.55 : 1
-          }}
-        >
-          Carpeta de grabación
-        </button>
-        <button type="button" onClick={onOpenQr} style={btnQr} title="Abre un popover con el QR (mismo Wi-Fi).">
-          <span aria-hidden style={{ fontSize: 14 }}>▦</span> QR de cámaras (Fusión en vivo)
-        </button>
-        <button
-          type="button"
-          onClick={onOpenAudio}
-          style={btnAudio}
-          title="Abre el panel flotante de audio: mic, nivel, ganancia y CLIP."
-        >
-          <span aria-hidden style={{ fontSize: 14 }}>♪</span>
-          {hasPcAudio ? ' Audio de PC · activo' : ' Audio de PC'}
-        </button>
-        <button
-          type="button"
-          disabled={isoBusy || programRecording}
-          onClick={() => void onAddDisplayCapture()}
-          style={{
-            ...btnNeutral,
-            fontWeight: 600,
-            opacity: isoBusy || programRecording ? 0.55 : 1,
-            cursor: isoBusy || programRecording ? 'not-allowed' : 'pointer'
-          }}
-          title="Pantalla completa o ventana de esta PC (selector de Windows)."
-        >
-          <span aria-hidden style={{ fontSize: 14 }}>⧉</span> Pantalla / ventana
-        </button>
-      </div>
-      {outputDir ? (
-        <div style={pathLineMuted}>
-          Carpeta: <span style={pathTextBright}>{outputDir}</span>
-        </div>
-      ) : (
-        <div style={warnLineNoFolder}>
-          <strong style={{ color: '#fef3c7' }}>Sin carpeta elegida.</strong> Elegí dónde guardar el WebM del programa al
-          grabar la mezcla (misma carpeta base que en Sesión en vivo).
-        </div>
-      )}
+    <div style={workspaceInnerCard}>
+      {cancelFlowConfirm === 'recording' ? (
+        <StudioConfirmForm
+          message={
+            <>
+              ¿Cancelar la grabación del programa?
+              <br />
+              <br />
+              Se descarta esta toma (nada en disco).
+            </>
+          }
+          submitLabel="Cancelar toma"
+          danger
+          onConfirm={doCancelProgramFlow}
+          onCancel={() => setCancelFlowConfirm(null)}
+        />
+      ) : null}
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-        <span style={workspaceActionRowLabel}>Mezcla</span>
-        <button
-          type="button"
-          onClick={() => setMixMode('manual')}
-          disabled={programRecording}
-          style={{
-            padding: '8px 14px',
-            borderRadius: 8,
-            border: mixMode === 'manual' ? '2px solid #2dd4bf' : '1px solid #334155',
-            background: mixMode === 'manual' ? '#134e4a' : '#0f172a',
-            color: '#e2e8f0',
-            fontWeight: 600,
-            cursor: programRecording ? 'not-allowed' : 'pointer',
-            opacity: programRecording ? 0.6 : 1
-          }}
-        >
-          Manual
-        </button>
-        <button
-          type="button"
-          onClick={() => setMixMode('auto')}
-          disabled={programRecording}
-          style={{
-            padding: '8px 14px',
-            borderRadius: 8,
-            border: mixMode === 'auto' ? '2px solid #a78bfa' : '1px solid #334155',
-            background: mixMode === 'auto' ? '#4c1d95' : '#0f172a',
-            color: '#e2e8f0',
-            fontWeight: 600,
-            cursor: programRecording ? 'not-allowed' : 'pointer',
-            opacity: programRecording ? 0.6 : 1
-          }}
-        >
-          Automático
-        </button>
+      {cancelFlowConfirm === 'preview' ? (
+        <StudioConfirmForm
+          message={
+            <>
+              ¿Descartar la vista previa del programa?
+              <br />
+              <br />
+              No se guardará el WebM ni el MP4.
+            </>
+          }
+          submitLabel="Descartar"
+          danger
+          onConfirm={doCancelProgramFlow}
+          onCancel={() => setCancelFlowConfirm(null)}
+        />
+      ) : null}
+
+      <div style={workspaceToolbar('teal')}>
+        <div style={workspaceEyebrow}>Fusión en vivo</div>
+        {cameraIds.length === 0 ? (
+          <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.55, maxWidth: 640 }}>
+            Programa <strong style={{ color: '#e2e8f0' }}>al aire</strong> desde celulares (mezcla ya grabada, sin pistas
+            ISO). Conectá con el QR de <strong style={{ color: '#e2e8f0' }}>esta pestaña</strong> — no el de Sesión en vivo.
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.45 }}>
+            <strong style={{ color: '#5eead4' }}>{cameraIds.length}</strong> fuente
+            {cameraIds.length !== 1 ? 's' : ''} — miniatura = al aire · <strong style={{ color: '#e2e8f0' }}>Grabar</strong>{' '}
+            en la barra de abajo.
+          </div>
+        )}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+          <span style={workspaceActionRowLabel}>Conexión</span>
+          <button
+            type="button"
+            onClick={onOpenQr}
+            title="QR en la misma Wi‑Fi — modo Fusión en vivo (no sirve en Sesión en vivo)."
+            style={{
+              padding: '8px 14px',
+              borderRadius: 8,
+              border: '1px solid #0d9488',
+              background: '#134e4a',
+              color: '#ccfbf1',
+              fontWeight: 700,
+              fontSize: 12,
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8
+            }}
+          >
+            <span aria-hidden style={{ fontSize: 14 }}>▦</span>
+            QR · conectar cámaras
+          </button>
+          <button
+            type="button"
+            onClick={onOpenAudio}
+            style={btnAudio}
+            title="Mic de PC, nivel y ganancia (opcional en la mezcla)."
+          >
+            <span aria-hidden style={{ fontSize: 14 }}>♪</span>
+            {hasPcAudio ? ' Audio de PC · activo' : ' Audio de PC'}
+          </button>
+          <button
+            type="button"
+            disabled={isoBusy || programRecording}
+            onClick={() => void onAddDisplayCapture()}
+            style={{
+              ...btnNeutral,
+              fontWeight: 600,
+              opacity: isoBusy || programRecording ? 0.55 : 1,
+              cursor: isoBusy || programRecording ? 'not-allowed' : 'pointer'
+            }}
+            title="Capturar el monitor o una ventana de esta PC y usarla como fuente en vivo."
+          >
+            <span aria-hidden style={{ fontSize: 14 }}>⧉</span> Transmitir ventana o pestaña
+          </button>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+          <span style={workspaceActionRowLabel}>Mezcla</span>
+          <button
+            type="button"
+            onClick={() => setMixMode('manual')}
+            disabled={programRecording}
+            style={{
+              padding: '8px 14px',
+              borderRadius: 8,
+              border: mixMode === 'manual' ? '2px solid #2dd4bf' : '1px solid #334155',
+              background: mixMode === 'manual' ? '#134e4a' : '#0f172a',
+              color: '#e2e8f0',
+              fontWeight: 600,
+              cursor: programRecording ? 'not-allowed' : 'pointer',
+              opacity: programRecording ? 0.6 : 1
+            }}
+          >
+            Manual
+          </button>
+          <button
+            type="button"
+            onClick={() => setMixMode('auto')}
+            disabled={programRecording}
+            style={{
+              padding: '8px 14px',
+              borderRadius: 8,
+              border: mixMode === 'auto' ? '2px solid #a78bfa' : '1px solid #334155',
+              background: mixMode === 'auto' ? '#4c1d95' : '#0f172a',
+              color: '#e2e8f0',
+              fontWeight: 600,
+              cursor: programRecording ? 'not-allowed' : 'pointer',
+              opacity: programRecording ? 0.6 : 1
+            }}
+          >
+            Automático
+          </button>
+        </div>
+        {cameraIds.length === 0 ? (
+          <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.45 }}>
+            En el celular: Transmitir · director automático solo con layout de una cámara
+          </div>
+        ) : mixMode === 'auto' ? (
+          <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.45 }}>
+            Director automático activo — ajustá tiempos en el panel morado debajo
+          </div>
+        ) : null}
       </div>
 
       <div className="fusion-workspace">
@@ -1725,9 +1824,7 @@ export function LiveFusionPanel({
                           fontSize: 13
                         }}
                       />
-                      <span style={{ color: '#64748b', fontSize: 11 }}>
-                        Entre 2 y 120 s. Cambiar tiempo reinicia el ritmo del intervalo.
-                      </span>
+                      <span style={{ color: '#64748b', fontSize: 11 }}>2–120 s</span>
                     </label>
                     {autoStrategy === 'weightedRandom' ? (
                       <label style={{ fontSize: 11, color: '#94a3b8', display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer' }}>
@@ -1738,13 +1835,13 @@ export function LiveFusionPanel({
                           disabled={programRecording}
                           style={{ marginTop: 2 }}
                         />
-                        <span>Evitar dos tomas seguidas de la misma cámara (si hay más de una fuente)</span>
+                        <span>No repetir la misma cámara seguida</span>
                       </label>
                     ) : null}
                     {autoStrategy === 'weightedRandom' && cameraIds.length > 0 ? (
                       <div style={{ fontSize: 11, color: '#94a3b8' }}>
                         <div style={{ marginBottom: 8, fontWeight: 600, color: '#cbd5e1' }}>
-                          Peso por cámara (1–100; más alto = más probabilidad al cortar)
+                          Peso por cámara (1–100)
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                           {cameraIds.map((cid) => (
@@ -1807,32 +1904,22 @@ export function LiveFusionPanel({
 
           <div className="fusion-program-heading">
             <div style={{ textAlign: 'center', margin: '0 auto', maxWidth: 560 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>Programa (salida)</div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>Programa</div>
               <div style={{ fontSize: 11, color: '#64748b', marginTop: 4, lineHeight: 1.45 }}>
                 {mixMode === 'manual' ? (
                   <>
-                    Vista que iría “al aire”. Elegí la escena con las fuentes a la derecha.
-                    {programLayoutId === 'single' ? (
-                      <>
-                        {' '}
-                        <strong>Recorte</strong> / <strong>Zoom</strong>: pellizco y mover a la vez (sin
-                        soltar); clic y arrastrar en zoom.
-                      </>
-                    ) : (
-                      <>
-                        {' '}
-                        En multi-cámara: tocá un recuadro en el programa y asigná con la miniatura.
-                      </>
-                    )}
+                    Escena a la izquierda · fuentes a la derecha · miniatura = al aire.
+                    {programLayoutId !== 'single'
+                      ? ' En multi-cámara: tocá un recuadro del programa y asigná fuente.'
+                      : null}
                   </>
                 ) : (
                   <>
-                    Director automático:{' '}
+                    Director:{' '}
                     <strong style={{ color: '#e9d5ff' }}>
-                      {autoStrategy === 'roundRobin' ? 'rotación fija' : 'azar ponderado'}
+                      {autoStrategy === 'roundRobin' ? 'rotación' : 'azar ponderado'}
                     </strong>{' '}
-                    · una toma cada{' '}
-                    <strong style={{ color: '#e9d5ff' }}>{autoShotDurationSec}s</strong>.
+                    · {autoShotDurationSec}s por toma (solo layout una cámara).
                   </>
                 )}
               </div>
@@ -1884,7 +1971,7 @@ export function LiveFusionPanel({
               </label>
             </div>
             <div className="fusion-program-heading-sources">
-              {mixMode === 'manual' ? 'Fuentes (tocá = al programa)' : 'Fuentes (vista previa · elige el director)'}
+              {mixMode === 'manual' ? 'Fuentes' : 'Fuentes (director automático)'}
             </div>
           </div>
 
@@ -2033,20 +2120,26 @@ export function LiveFusionPanel({
                   <aside className="fusion-program-rail fusion-program-rail--right">
                     <FusionProgramBackgroundTools
                       background={programBackground}
-                      cameraIds={cameraIds}
-                      resolveAlias={cameraAliases.resolve}
                       onBackgroundChange={setProgramBackground}
                     />
                     {framingEditable && programCameraId ? (
-                      <FusionProgramTools
-                        cropEditOpen={cropEditOpen}
-                        programCrop={programCrop}
-                        programFramingTarget={programFramingTarget}
-                        framingNeutral={LIVE_FRAMING_NEUTRAL}
-                        onToggleCropEdit={toggleCropEdit}
-                        onResetCrop={() => resetCrop(programCameraId)}
-                        onResetFraming={() => resetFraming(programCameraId)}
-                      />
+                      <>
+                        <FusionProgramTools
+                          cropEditOpen={cropEditOpen}
+                          programCrop={programCrop}
+                          programFramingTarget={programFramingTarget}
+                          framingNeutral={LIVE_FRAMING_NEUTRAL}
+                          onToggleCropEdit={toggleCropEdit}
+                          onResetCrop={() => resetCrop(programCameraId)}
+                          onResetFraming={() => resetFraming(programCameraId)}
+                        />
+                        <FusionMotionTrigger
+                          active={motionOpen}
+                          disabled={cropEditOpen}
+                          playing={framingMotionLabel != null}
+                          onClick={() => setMotionOpen((v) => !v)}
+                        />
+                      </>
                     ) : null}
                   </aside>
                 ) : null}
@@ -2057,7 +2150,7 @@ export function LiveFusionPanel({
               className="fusion-sidebar-sources--mobile"
               style={{ fontSize: 11, fontWeight: 600, color: '#64748b', letterSpacing: 0.04, marginBottom: 8 }}
             >
-              {mixMode === 'manual' ? 'Fuentes (tocá = al programa)' : 'Fuentes (vista previa · elige el director)'}
+              {mixMode === 'manual' ? 'Fuentes' : 'Fuentes (director automático)'}
             </div>
             <div className="fusion-thumb-strip">
               {cameraIds.map((id) => {
@@ -2191,11 +2284,11 @@ export function LiveFusionPanel({
                   background: '#0c121c'
                 }}
               >
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0', marginBottom: 8 }}>
-                  Última grabación del programa
+                <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0', marginBottom: 6 }}>
+                  Vista previa
                 </div>
                 <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>
-                  Nombre del archivo (misma base para WebM y MP4)
+                  Nombre de archivo
                 </label>
                 <input
                   type="text"
@@ -2216,7 +2309,7 @@ export function LiveFusionPanel({
                   }}
                 />
                 <div style={{ fontSize: 11, color: '#64748b', marginBottom: 10, lineHeight: 1.4 }}>
-                  MP4 H.264/AAC con FFmpeg: mejor compatibilidad en el Reproductor de Windows; puede tardar según la duración.
+                  <strong>MP4</strong> suele ir mejor en Windows; WebM guarda más rápido.
                 </div>
                 {programPreviewUrl ? (
                   <video
@@ -2278,7 +2371,7 @@ export function LiveFusionPanel({
                         <span className="studio-spinner" aria-hidden /> Generando MP4…
                       </>
                     ) : (
-                      'Guardar MP4 (recomendado Windows)'
+                      'Guardar MP4'
                     )}
                   </button>
                   <button
@@ -2323,8 +2416,8 @@ export function LiveFusionPanel({
                           {exportTarget === 'mp4' ? 'Generando MP4…' : 'Guardando WebM…'}
                         </strong>{' '}
                         {exportTarget === 'mp4'
-                          ? 'FFmpeg está re-codificando a H.264. Puede tardar bastante según la duración (no cierres la app).'
-                          : 'Escribiendo el archivo en la carpeta de grabación.'}
+                          ? 'Convirtiendo a H.264 (puede tardar; no cierres la app).'
+                          : 'Guardando en la carpeta de grabación…'}
                       </div>
                       <span
                         style={{
@@ -2392,14 +2485,6 @@ export function LiveFusionPanel({
           </div>
         </div>
 
-      {!cameraIds.length ? (
-        <div style={{ color: '#94a3b8', fontSize: 13, lineHeight: 1.5 }}>
-          <strong style={{ color: '#fca5a5' }}>No hay video:</strong> escaneá el <strong style={{ color: '#e2e8f0' }}>QR
-          de Fusión en vivo</strong> (botón arriba) con cada celular y tocá <strong style={{ color: '#e2e8f0' }}>Transmitir</strong>.
-          Recordá que el QR de «Sesión en vivo» no sirve acá — cada pestaña usa el suyo.
-        </div>
-      ) : null}
-
       {configPopoverOpen ? (
         <div
           role="dialog"
@@ -2445,11 +2530,9 @@ export function LiveFusionPanel({
               }}
             >
               <div>
-                <div style={{ fontSize: 13, fontWeight: 700 }}>Configuración por formato</div>
-                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>
-                  Elegí qué cámaras aparecen en cada formato y la orientación de la salida. Después, con
-                  los botones de la barra lateral del programa, mandás cada formato al aire (también
-                  durante la grabación). En layouts multi-slot el director automático queda pausado.
+                <div style={{ fontSize: 13, fontWeight: 700 }}>Formatos y orientación</div>
+                <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, lineHeight: 1.45 }}>
+                  Asigná cámaras por layout. El director automático solo en una cámara al aire.
                 </div>
               </div>
               <button
@@ -2474,7 +2557,7 @@ export function LiveFusionPanel({
 
             {cameraIds.length === 0 ? (
               <div style={{ fontSize: 11, color: '#94a3b8', padding: '12px 0' }}>
-                Esperá a que los celulares se conecten (escaneá el QR) para configurar los formatos.
+                Conectá fuentes primero (QR arriba).
               </div>
             ) : (
               <>
@@ -2745,6 +2828,22 @@ export function LiveFusionPanel({
           </div>
         </div>
       ) : null}
+
+      <FloatingMotionPanel
+        open={motionOpen && framingEditable && programCameraId != null}
+        onClose={() => setMotionOpen(false)}
+        disabled={cropEditOpen}
+        motionLabel={framingMotionLabel}
+        framingNeutral={LIVE_FRAMING_NEUTRAL}
+        getCurrentFraming={() =>
+          programCameraId
+            ? (framingTargetRef.current.get(programCameraId) ?? LIVE_FRAMING_NEUTRAL)
+            : LIVE_FRAMING_NEUTRAL
+        }
+        onPlay={playFramingMotion}
+        onStop={cancelFramingMotion}
+        onStatus={onStatus}
+      />
     </div>
   )
 }

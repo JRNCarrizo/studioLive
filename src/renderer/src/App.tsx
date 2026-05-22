@@ -17,17 +17,19 @@ import { FusionPanel } from './FusionPanel'
 import { IsoRecordingReviewOverlay } from './IsoRecordingReviewOverlay'
 import { FusionStudioTransport } from './FusionStudioTransport'
 import { LiveFusionPanel } from './LiveFusionPanel'
+import {
+  readStoredExcludeFromCapture,
+  writeStoredExcludeFromCapture
+} from './excludeFromCaptureStorage'
+import { readStoredOutputDir, writeStoredOutputDir } from './outputDirStorage'
 import { QrConnectOverlay } from './QrConnectOverlay'
 import { usePcAudioMix } from './usePcAudioMix'
 import {
   btnAudio,
   btnNeutral,
-  btnQr,
-  pathLineMuted,
-  pathTextBright,
-  warnLineNoFolder,
   workspaceActionRowLabel,
   workspaceEyebrow,
+  workspaceInnerCard,
   workspaceToolbar
 } from './workspaceChrome'
 
@@ -203,7 +205,9 @@ export default function App() {
   const [status, setStatus] = useState('Conectando al servidor local...')
   const [cameras, setCameras] = useState<string[]>([])
   const [streams, setStreams] = useState<Record<string, MediaStream>>({})
-  const [outputDir, setOutputDir] = useState<string | null>(null)
+  const [outputDir, setOutputDir] = useState<string | null>(() => readStoredOutputDir())
+  const [excludeFromCaptureSupported, setExcludeFromCaptureSupported] = useState(false)
+  const [excludeFromCapture, setExcludeFromCapture] = useState(false)
   const [recording, setRecording] = useState(false)
   const [isoPaused, setIsoPaused] = useState(false)
   /** Tras detener ISO: blobs en memoria hasta vista previa + guardar o descartar. */
@@ -213,8 +217,6 @@ export default function App() {
   const [isoPreviewUrls, setIsoPreviewUrls] = useState<Record<string, string>>({})
   /** Toma activa en la vista previa post-grabación (un reproductor grande a la vez). */
   const [isoPreviewSelectedKey, setIsoPreviewSelectedKey] = useState<string>('')
-  const [isoPreviewStageFs, setIsoPreviewStageFs] = useState(false)
-  const isoPreviewStageRef = useRef<HTMLDivElement | null>(null)
 
   /** Grabando ISO o con tomas en memoria esperando vista previa / guardado. */
   const isoBusy = recording || pendingIsoSave != null
@@ -260,16 +262,13 @@ export default function App() {
       setIsoPreviewSelectedKey('')
       return
     }
+    const defaultKey =
+      isoPreviewItemsSorted.find((i) => !i.mime.startsWith('audio/'))?.recKey ??
+      isoPreviewItemsSorted[0]!.recKey
     setIsoPreviewSelectedKey((k) =>
-      k && isoPreviewItemsSorted.some((i) => i.recKey === k) ? k : isoPreviewItemsSorted[0]!.recKey
+      k && isoPreviewItemsSorted.some((i) => i.recKey === k) ? k : defaultKey
     )
   }, [isoPreviewItemsSorted])
-
-  useEffect(() => {
-    const onFs = () => setIsoPreviewStageFs(Boolean(document.fullscreenElement))
-    document.addEventListener('fullscreenchange', onFs)
-    return () => document.removeEventListener('fullscreenchange', onFs)
-  }, [])
 
   useEffect(() => {
     if (!pendingIsoSave && document.fullscreenElement) {
@@ -320,6 +319,36 @@ export default function App() {
   useEffect(() => {
     workspaceModeRef.current = workspaceMode
   }, [workspaceMode])
+
+  const applyExcludeFromCapture = useCallback(async (enabled: boolean, silent = false) => {
+    if (!window.studio?.setExcludeFromCapture) return false
+    const res = await window.studio.setExcludeFromCapture(enabled)
+    if (!res.supported) {
+      if (!silent) setStatus('Ocultar en captura solo está disponible en Windows y macOS.')
+      return false
+    }
+    if (!res.ok) return false
+    setExcludeFromCapture(enabled)
+    writeStoredExcludeFromCapture(enabled)
+    if (!silent) {
+      setStatus(
+        enabled
+          ? 'Studio Live oculto en capturas de pantalla (vos seguís viéndolo en el monitor).'
+          : 'Studio Live vuelve a aparecer en capturas de pantalla.'
+      )
+    }
+    return true
+  }, [])
+
+  useEffect(() => {
+    void (async () => {
+      const supported = Boolean(await window.studio?.isExcludeFromCaptureSupported?.())
+      setExcludeFromCaptureSupported(supported)
+      if (supported && readStoredExcludeFromCapture()) {
+        await applyExcludeFromCapture(true, true)
+      }
+    })()
+  }, [applyExcludeFromCapture])
 
   const pingUrls = useMemo(() => {
     if (!info) return []
@@ -460,17 +489,22 @@ export default function App() {
         cameraAliases.setAlias(id, defaultAlias)
       }
       const captureKind = displaySourceKind(pickerSourceId)
+      if (captureKind === 'screen') {
+        void applyExcludeFromCapture(true, true)
+      }
       const screenTip =
         captureKind === 'window'
-          ? ' Si un vídeo (YouTube, etc.) se ve quieto, cerrá esta fuente y capturá la pantalla completa (monitor), no la ventana del navegador.'
+          ? ' Ventana: YouTube/streaming suele quedar congelado. Cerrá y elegí «Solo pantallas» → monitor completo.'
           : captureKind === 'screen'
-            ? ' Un solo monitor: minimizá Studio Live desde la barra de tareas para que no tape el tutorial. Comprobá en la mini que diga «Se mueve».'
+            ? excludeFromCaptureSupported
+              ? ' «Ocultar en captura» activado en el modal. Si YouTube se ve congelado: desactivá aceleración por hardware en Chrome y/o reiniciá con npm run dev:no-gpu.'
+              : ' Si YouTube se ve congelado: desactivá aceleración por hardware en el navegador o usá npm run dev:no-gpu.'
             : ''
       setStatus(
         `${kindLabel} agregada como fuente «${defaultAlias}». Se graba con las demás al iniciar ISO. Evitá capturar la ventana de Studio Live (efecto espejo).${screenTip}`
       )
     },
-    [cameraAliases, closeVideoSource]
+    [applyExcludeFromCapture, cameraAliases, closeVideoSource, excludeFromCaptureSupported]
   )
 
   const addDisplayCapture = useCallback(() => {
@@ -478,6 +512,10 @@ export default function App() {
       setStatus('Captura de pantalla solo disponible en la app Studio Live (Electron).')
       return
     }
+    void (async () => {
+      const supported = Boolean(await window.studio?.isExcludeFromCaptureSupported?.())
+      setExcludeFromCaptureSupported(supported)
+    })()
     setDisplayCapturePickerOpen(true)
   }, [])
 
@@ -700,9 +738,23 @@ export default function App() {
     }
   }, [info, closeCamera, handleIce, handleOffer])
 
+  const outputDirPickBlocked = recording || pendingIsoSave != null
+
   const pickFolder = async () => {
+    if (outputDirPickBlocked) {
+      setStatus(
+        pendingIsoSave
+          ? 'Guardá o descartá la grabación pendiente antes de cambiar la carpeta.'
+          : 'Detené la grabación antes de cambiar la carpeta.'
+      )
+      return
+    }
     const p = await window.studio.pickOutputDir()
-    setOutputDir(p)
+    if (p) {
+      setOutputDir(p)
+      writeStoredOutputDir(p)
+      setStatus(`Carpeta de grabación: ${folderLeafFromPath(p)}`)
+    }
   }
 
   const refreshAudioDeviceList = useCallback(async () => {
@@ -851,6 +903,10 @@ export default function App() {
     isoPauseStartedAtRef.current = null
     setIsoPaused(false)
     setRecording(false)
+    setExpandedCameraId(null)
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => {})
+    }
 
     if (!items.length) {
       setStatus('No había datos en las pistas al detener.')
@@ -955,23 +1011,9 @@ export default function App() {
 
   const discardPendingIso = useCallback(() => {
     if (!pendingIsoSave) return
-    if (!window.confirm('¿Descartar esta grabación? No se guardará ningún archivo.')) return
     setPendingIsoSave(null)
     setStatus('Grabación descartada (no se guardó ningún archivo).')
   }, [pendingIsoSave])
-
-  const toggleIsoPreviewStageFullscreen = useCallback(() => {
-    const el = isoPreviewStageRef.current
-    if (!el) return
-    if (!document.fullscreenElement) {
-      const p =
-        el.requestFullscreen?.() ??
-        (el as unknown as { webkitRequestFullscreen?: () => Promise<void> | void }).webkitRequestFullscreen?.()
-      if (p && typeof (p as Promise<void>).then === 'function') void (p as Promise<void>).catch(() => {})
-    } else {
-      void document.exitFullscreen().catch(() => {})
-    }
-  }, [])
 
   const startRecording = useCallback(async () => {
     if (!outputDir) {
@@ -1078,7 +1120,7 @@ export default function App() {
       return
     }
     if (!outputDir) {
-      setStatus('Elegí «Carpeta de grabación» arriba antes de grabar.')
+      setStatus('Elegí «Carpeta de grabación» en la barra superior antes de grabar.')
       return
     }
     const hasCameras = Object.keys(streams).some((id) => {
@@ -1166,7 +1208,7 @@ export default function App() {
                 ? pendingIsoSave
                   ? 'Guardá o descartá la grabación antes de usar Fusión'
                   : 'No podés pasar a Fusión mientras grabás'
-                : 'Editar fusión con archivos ya guardados (paso 2 después de Sesión en vivo)'
+                : 'Mezclar pistas ISO guardadas (paso 2)'
             }
             style={{
               padding: '6px 12px',
@@ -1204,7 +1246,7 @@ export default function App() {
                 ? pendingIsoSave
                   ? 'Guardá o descartá la grabación antes de usar Fusión en vivo'
                   : 'No podés cambiar de pestaña mientras grabás'
-                : 'Alternativa: mezcla en vivo con los celulares (graba ya mezclado, sin pistas separadas).'
+                : 'Programa al aire desde celulares (mezcla ya grabada, sin pistas ISO)'
             }
             style={{
               padding: '6px 12px',
@@ -1221,104 +1263,157 @@ export default function App() {
             Alt · Fusión en vivo
           </button>
         </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            minWidth: 0,
+            flex: '1 1 200px',
+            maxWidth: 520,
+            justifyContent: 'flex-end'
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => void pickFolder()}
+            disabled={outputDirPickBlocked}
+            title={
+              outputDirPickBlocked
+                ? pendingIsoSave
+                  ? 'Guardá o descartá la grabación pendiente antes de cambiar la carpeta.'
+                  : 'Detené la grabación antes de cambiar la carpeta.'
+                : outputDir
+                  ? `Carpeta actual (clic para cambiar):\n${outputDir}`
+                  : 'Elegí dónde guardar ISO, mezclas en vivo y exportaciones (las tres pestañas usan la misma carpeta).'
+            }
+            style={{
+              ...btnNeutral,
+              flexShrink: 0,
+              fontWeight: 600,
+              opacity: outputDirPickBlocked ? 0.55 : 1,
+              cursor: outputDirPickBlocked ? 'not-allowed' : 'pointer'
+            }}
+          >
+            {outputDir ? 'Cambiar carpeta' : 'Carpeta de grabación'}
+          </button>
+          {outputDir ? (
+            <span
+              title={outputDir}
+              style={{
+                fontSize: 11,
+                color: '#94a3b8',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                minWidth: 0
+              }}
+            >
+              <span style={{ color: '#cbd5e1', fontWeight: 600 }}>{folderLeafFromPath(outputDir)}</span>
+              <span style={{ color: '#475569' }}> · </span>
+              <span style={{ color: '#64748b' }}>{outputDir}</span>
+            </span>
+          ) : (
+            <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 600 }}>Sin carpeta</span>
+          )}
+        </div>
         <span
           style={{
             fontSize: 11,
             padding: '2px 8px',
             borderRadius: 6,
             background: signalingReady ? '#14532d' : '#450a0a',
-            color: signalingReady ? '#bbf7d0' : '#fecaca'
+            color: signalingReady ? '#bbf7d0' : '#fecaca',
+            flexShrink: 0
           }}
           title="IPC con el proceso principal: vaciado periódico de mensajes del servidor HTTPS/WSS"
         >
           {signalingReady ? 'Señalización: OK' : 'Señalización: no'}
         </span>
-        <span style={{ flex: 1 }} />
       </header>
 
       <section style={{ padding: 16, flex: 1, overflow: 'auto' }}>
         <div style={{ display: workspaceMode === 'live' ? 'block' : 'none' }}>
-        <div style={workspaceToolbar('sky')}>
-          <div style={workspaceEyebrow}>Paso 1 · Grabar por pistas (una pista por cámara + audio)</div>
-          <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.55, maxWidth: 720 }}>
-            <strong style={{ color: '#e2e8f0' }}>Transmitir desde el celular solo muestra el vídeo en la PC.</strong>{' '}
-            Para guardar archivos hace falta iniciar la grabación (botón abajo, cerca de las cámaras): se graban{' '}
-            <strong style={{ color: '#e2e8f0' }}>al mismo tiempo</strong> todas las cámaras conectadas y el audio de PC
-            (si lo activaste). Al detener podés <strong style={{ color: '#e2e8f0' }}>previsualizar cada toma</strong>; después
-            elegís <strong style={{ color: '#e2e8f0' }}>guardar en disco</strong> (nombre de carpeta) o descartar. Los{' '}
-            <code style={{ color: '#cbd5e1' }}>cam-*.webm</code> / <code style={{ color: '#cbd5e1' }}>audio-*.webm</code>{' '}
-            se escriben solo al confirmar; después usás «Fusión» (paso 2) para mezclarlas.
-          </div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-            <span style={workspaceActionRowLabel}>Carpeta y conexión</span>
-            <button
-              type="button"
-              onClick={pickFolder}
-              disabled={Boolean(pendingIsoSave)}
-              title={
-                pendingIsoSave
-                  ? 'Guardá o descartá la grabación pendiente antes de cambiar la carpeta.'
-                  : undefined
-              }
-              style={{
-                ...btnNeutral,
-                opacity: pendingIsoSave ? 0.55 : 1,
-                cursor: pendingIsoSave ? 'not-allowed' : 'pointer'
-              }}
-            >
-              Carpeta de grabación
-            </button>
-            <button
-              type="button"
-              onClick={openQrPopover}
-              style={btnQr}
-              title="Abre un popover con el QR (mismo Wi-Fi) para escanear desde el celular."
-            >
-              <span aria-hidden style={{ fontSize: 14 }}>▦</span> QR de cámaras (Sesión en vivo)
-            </button>
-            <button
-              type="button"
-              onClick={openAudioPanel}
-              style={btnAudio}
-              title="Abre un panel flotante con selección de mic, nivel, ganancia y aviso de saturación."
-            >
-              <span aria-hidden style={{ fontSize: 14 }}>♪</span>
-              {audioStream ? ' Audio de PC · activo' : ' Audio de PC'}
-            </button>
-            <button
-              type="button"
-              disabled={isoBusy}
-              onClick={() => void addDisplayCapture()}
-              style={{
-                ...btnNeutral,
-                fontWeight: 600,
-                opacity: isoBusy ? 0.55 : 1,
-                cursor: isoBusy ? 'not-allowed' : 'pointer'
-              }}
-              title={
-                isoBusy
-                  ? 'No podés agregar captura mientras hay grabación pendiente o en curso.'
-                  : 'Selector de Windows: pantalla completa o una ventana (fuente en esta PC).'
-              }
-            >
-              <span aria-hidden style={{ fontSize: 14 }}>⧉</span> Pantalla / ventana
-            </button>
-          </div>
-          {outputDir ? (
-            <div style={pathLineMuted}>
-              Carpeta: <span style={pathTextBright}>{outputDir}</span>
+        <div style={workspaceInnerCard}>
+          <div style={workspaceToolbar('sky')}>
+            <div style={workspaceEyebrow}>Sesión en vivo</div>
+            {tileCameraIds.length === 0 ? (
+              <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.55, maxWidth: 640 }}>
+                Conectá celulares o captura de pantalla. <strong style={{ color: '#e2e8f0' }}>Transmitir</strong> solo
+                muestra el vídeo; <strong style={{ color: '#e2e8f0' }}>Grabar</strong> (barra de abajo) guarda una pista por
+                cámara para <strong style={{ color: '#e2e8f0' }}>Fusión (archivos)</strong>.
+              </div>
+            ) : (
+              <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.45 }}>
+                <strong style={{ color: '#7dd3fc' }}>{tileCameraIds.length}</strong> fuente
+                {tileCameraIds.length !== 1 ? 's' : ''} conectada{tileCameraIds.length !== 1 ? 's' : ''} — usá{' '}
+                <strong style={{ color: '#e2e8f0' }}>Grabar</strong> abajo para generar{' '}
+                <code style={{ color: '#cbd5e1' }}>cam-*.webm</code>.
+              </div>
+            )}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+              <span style={workspaceActionRowLabel}>Conexión</span>
+              <button
+                type="button"
+                onClick={openQrPopover}
+                title="QR en la misma Wi‑Fi — modo Sesión en vivo (no sirve en otras pestañas)."
+                style={{
+                  padding: '8px 14px',
+                  borderRadius: 8,
+                  border: '1px solid #0284c7',
+                  background: '#0c4a6e',
+                  color: '#7dd3fc',
+                  fontWeight: 700,
+                  fontSize: 12,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8
+                }}
+              >
+                <span aria-hidden style={{ fontSize: 14 }}>▦</span>
+                QR · conectar cámaras
+              </button>
+              <button
+                type="button"
+                onClick={openAudioPanel}
+                style={btnAudio}
+                title="Mic de PC, nivel y ganancia (opcional en la grabación ISO)."
+              >
+                <span aria-hidden style={{ fontSize: 14 }}>♪</span>
+                {audioStream ? ' Audio de PC · activo' : ' Audio de PC'}
+              </button>
+              <button
+                type="button"
+                disabled={isoBusy}
+                onClick={() => void addDisplayCapture()}
+                style={{
+                  ...btnNeutral,
+                  fontWeight: 600,
+                  opacity: isoBusy ? 0.55 : 1,
+                  cursor: isoBusy ? 'not-allowed' : 'pointer'
+                }}
+                title={
+                  isoBusy
+                    ? 'No podés agregar captura mientras hay grabación pendiente o en curso.'
+                    : 'Capturar el monitor o una ventana de esta PC y usarla como fuente en vivo.'
+                }
+              >
+                <span aria-hidden style={{ fontSize: 14 }}>⧉</span> Transmitir ventana o pestaña
+              </button>
             </div>
-          ) : (
-            <div style={{ fontSize: 11, color: '#475569' }}>
-              Elegí carpeta de grabación para poder guardar WebM al detener.
-            </div>
-          )}
-        </div>
+            {tileCameraIds.length === 0 ? (
+              <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.45 }}>
+                En el celular: Transmitir · «Señalización» arriba debe quedar OK
+              </div>
+            ) : (
+              <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.45 }}>
+                Clic en miniatura para ampliar · ↻ girar · ✕ cerrar fuente
+              </div>
+            )}
+          </div>
 
         <div style={{ width: '100%', maxWidth: '100%' }}>
-          <div style={{ fontSize: 11, color: '#64748b', letterSpacing: 0.06, textTransform: 'uppercase', marginBottom: 10 }}>
-            Entradas en vivo — celulares, pantalla/ventana (PC) · clic para ampliar · ↻ gira 90° (cámaras) · ✕ cierra
-          </div>
           <div className="camera-grid">
             {tileCameraIds.map((id) => (
               <CameraTile
@@ -1345,11 +1440,18 @@ export default function App() {
             ))}
           </div>
           {!tileCameraIds.length ? (
-            <div style={{ color: '#94a3b8', fontSize: 13, lineHeight: 1.5 }}>
-              <strong style={{ color: '#cbd5e1' }}>Esperando cámaras…</strong> Escaneá el{' '}
-              <strong style={{ color: '#e2e8f0' }}>QR de Sesión en vivo</strong> (botón arriba) con cada celular y tocá{' '}
-              <strong style={{ color: '#e2e8f0' }}>Transmitir</strong>. Si «Señalización» no pasa a OK en unos
-              segundos, reiniciá la app.
+            <div
+              style={{
+                color: '#64748b',
+                fontSize: 12,
+                lineHeight: 1.5,
+                padding: '24px 12px',
+                textAlign: 'center',
+                border: '1px dashed #334155',
+                borderRadius: 10
+              }}
+            >
+              Todavía no hay fuentes en el panel.
             </div>
           ) : null}
         </div>
@@ -1389,6 +1491,7 @@ export default function App() {
             allowRotate={!isDisplayCaptureId(expandedCameraId)}
           />
         ) : null}
+        </div>
         </div>
 
         <FloatingPcAudioPanel
@@ -1438,6 +1541,9 @@ export default function App() {
           open={displayCapturePickerOpen}
           onClose={() => setDisplayCapturePickerOpen(false)}
           onPick={(sourceId) => void onDisplaySourcePicked(sourceId)}
+          excludeFromCaptureSupported={excludeFromCaptureSupported}
+          excludeFromCapture={excludeFromCapture}
+          onExcludeFromCaptureChange={(enabled) => void applyExcludeFromCapture(enabled)}
         />
 
         <div style={{ display: workspaceMode === 'liveFusion' ? 'block' : 'none' }}>
@@ -1452,7 +1558,6 @@ export default function App() {
             audioStream={pcRecordingStream}
             onStatus={setStatus}
             isoBusy={isoBusy}
-            onPickOutputDir={() => void pickFolder()}
             onOpenQr={openQrPopover}
             onOpenAudio={openAudioPanel}
             hasPcAudio={Boolean(audioStream)}
@@ -1461,36 +1566,6 @@ export default function App() {
         </div>
 
         <div style={{ display: workspaceMode === 'fusion' ? 'block' : 'none' }}>
-          <div style={workspaceToolbar('violet')}>
-            <div style={workspaceEyebrow}>Paso 2 · Fusión con archivos (post-grabación)</div>
-            <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.55, maxWidth: 720 }}>
-              Acá cargás los <code style={{ color: '#cbd5e1' }}>cam-*.webm</code> ya grabados del paso 1. La cuadrícula en
-              vivo y el QR de celulares están en las otras pestañas para no mezclar sesiones.
-            </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-              <span style={workspaceActionRowLabel}>Carpeta y navegación</span>
-              <button type="button" onClick={() => void pickFolder()} style={btnNeutral}>
-                Carpeta de grabación
-              </button>
-              <button
-                type="button"
-                onClick={() => setWorkspaceMode('live')}
-                style={{ ...btnNeutral, fontWeight: 600 }}
-              >
-                Volver a sesión en vivo
-              </button>
-            </div>
-            {outputDir ? (
-              <div style={pathLineMuted}>
-                Carpeta: <span style={pathTextBright}>{outputDir}</span>
-              </div>
-            ) : (
-              <div style={warnLineNoFolder}>
-                <strong style={{ color: '#fef3c7' }}>Sin carpeta elegida.</strong> Tocá «Carpeta de grabación» en esta
-                barra para poder guardar la fusión exportada.
-              </div>
-            )}
-          </div>
           <FusionPanel outputDir={outputDir} liveRecording={isoBusy} onStatus={setStatus} />
         </div>
       </section>
@@ -1506,9 +1581,6 @@ export default function App() {
           selectedKey={isoPreviewSelectedKey}
           onSelectKey={setIsoPreviewSelectedKey}
           active={isoPreviewActive}
-          stageRef={isoPreviewStageRef}
-          stageFullscreen={isoPreviewStageFs}
-          onToggleStageFullscreen={toggleIsoPreviewStageFullscreen}
           pcAudioPreviewUrl={isoPreviewUrls[PC_AUDIO_RECORDER_KEY] ?? null}
           resolveAlias={cameraAliases.resolve}
         />
@@ -1743,23 +1815,42 @@ function CameraTile({
   const [draftAlias, setDraftAlias] = useState(alias ?? '')
   const aliasInputRef = useRef<HTMLInputElement>(null)
 
+  const isDisplay = isDisplayCaptureId(cameraId)
+
   useEffect(() => {
     const el = ref.current
     if (!el) return
     el.srcObject = stream ?? null
     const vt = stream?.getVideoTracks()[0]
-    if (vt && isDisplayCaptureId(cameraId)) configureDisplayCaptureVideoTrack(vt)
-    if (stream?.getVideoTracks().length) void el.play().catch(() => {})
-  }, [stream, cameraId])
+    if (vt && isDisplay) configureDisplayCaptureVideoTrack(vt)
+    if (stream?.getVideoTracks().length) {
+      void el.play().catch(() => {})
+    }
+  }, [stream, cameraId, isDisplay])
 
   useEffect(() => {
-    if (!isDisplayCaptureId(cameraId) || !stream) return
-    const id = window.setInterval(() => {
-      const el = ref.current
-      if (el?.paused) void el.play().catch(() => {})
-    }, 1500)
-    return () => window.clearInterval(id)
-  }, [cameraId, stream])
+    if (!isDisplay || !stream) return
+    const el = ref.current
+    if (!el) return
+    const nudge = () => {
+      if (el.paused) void el.play().catch(() => {})
+    }
+    const intervalId = window.setInterval(nudge, 1200)
+    let rvfc = 0
+    if ('requestVideoFrameCallback' in el) {
+      const tick = () => {
+        nudge()
+        rvfc = el.requestVideoFrameCallback(tick)
+      }
+      rvfc = el.requestVideoFrameCallback(tick)
+    }
+    return () => {
+      window.clearInterval(intervalId)
+      if (rvfc && 'cancelVideoFrameCallback' in el) {
+        el.cancelVideoFrameCallback(rvfc)
+      }
+    }
+  }, [cameraId, stream, isDisplay])
 
   useEffect(() => {
     if (!editing) setDraftAlias(alias ?? '')
@@ -1999,6 +2090,8 @@ function CameraTile({
               autoPlay
               playsInline
               muted
+              width={isDisplay ? 1280 : undefined}
+              height={isDisplay ? 720 : undefined}
               style={videoPreviewStyle(rotateDeg)}
             />
           </div>

@@ -1,4 +1,5 @@
 import { isDisplayCaptureId } from './displayCapture'
+import { YOUTUBE_CAPTURE_CHECKLIST } from './youtubeCaptureHelp'
 
 export type SourceHealthState = 'ok' | 'waiting' | 'frozen' | 'no_signal'
 
@@ -120,14 +121,19 @@ export function evaluateSourceHealth(params: {
     }
   }
 
+  const settings = track?.getSettings?.() as MediaTrackSettings & { displaySurface?: string }
+  const surface = settings?.displaySurface
   const fp = frameFingerprint(video)
   const frozen = updateFrozenStreak(cameraId, fp)
   if (frozen) {
+    const youtubeHint =
+      surface === 'window' || surface === 'browser'
+        ? 'Elegiste ventana/pestaña: con YouTube casi siempre falla. Cerrá y capturá el monitor completo.'
+        : `YouTube en el navegador suele bloquear la captura (DRM/GPU). ${YOUTUBE_CAPTURE_CHECKLIST[1]} ${YOUTUBE_CAPTURE_CHECKLIST[4]}`
     return {
       state: 'frozen',
       label: 'Parece congelada',
-      detail:
-        'La imagen no cambia. Para YouTube o el navegador: cerrá esta fuente y capturá la pantalla completa (monitor), no la ventana de Chrome/Edge.'
+      detail: `La imagen no cambia. ${youtubeHint}`
     }
   }
 

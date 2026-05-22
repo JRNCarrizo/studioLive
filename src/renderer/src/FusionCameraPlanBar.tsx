@@ -76,9 +76,7 @@ export function FusionCameraPlanBar({
       <div className="fusion-camera-plan__header">
         <span className="fusion-camera-plan__title">Plan de cámara</span>
         <span className="fusion-camera-plan__hint">
-          {interactive
-            ? 'Clic o arrastrá en la barra · cada color es una toma'
-            : 'Cada bloque es una toma al aire'}
+          {interactive ? 'Clic o arrastrá para mover el tiempo' : 'Tomas al aire'}
         </span>
       </div>
       <div
@@ -111,8 +109,8 @@ export function FusionCameraPlanBar({
         {segments.length === 0 ? (
           <div className="fusion-camera-plan__empty">
             {interactive
-              ? 'Al grabar, cada cambio de cámara aparece aquí como un bloque de color.'
-              : 'Los cortes de cámara aparecerán aquí al grabar el programa.'}
+              ? 'Al grabar, cada cambio de cámara suma un bloque.'
+              : 'Aparece al grabar el programa.'}
           </div>
         ) : (
           segments.map((seg, i) => {

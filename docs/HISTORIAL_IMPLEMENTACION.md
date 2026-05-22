@@ -1,6 +1,6 @@
 # Historial de implementación y contexto para retomar
 
-**Uso:** al volver a trabajar en el proyecto, pedir al asistente que lea **`docs/PLAN.md`** (visión y stack) y **este archivo** (qué se implementó y cómo está cableado).
+**Uso:** al volver a trabajar en el proyecto, leer **`docs/ESTUDIO_LIVE_GUIA.md`** (estado y herramientas del producto), **`docs/PLAN.md`** (visión y stack) y **este archivo** (qué se implementó y cómo está cableado).
 
 **Repo remoto:** [github.com/JRNCarrizo/studioLive](https://github.com/JRNCarrizo/studioLive) · rama `main`.
 
@@ -76,11 +76,38 @@ App **Electron + Vite + React**: multicámara por WebRTC, grabación ISO (`cam-*
 
 ---
 
+## Fusión en vivo (`LiveFusionPanel.tsx`)
+
+- QR y signaling separados (`liveFusion` vs `live` en sesión ISO).
+- Mismo canvas de **programa** que fusión archivos: layouts, fondo, recorte, zoom/pan, plan de cámara.
+- **Director automático** en layout single: rotación de cámara cada N s (round-robin o ponderado); desactivado en multi-layout.
+- Grabación del programa vía `MediaRecorder` sobre el canvas; bloqueada si hay ISO pendiente de guardar.
+
+---
+
+## Encuadre, recorte y movimiento de cámara
+
+| Módulo | Rol |
+|--------|-----|
+| `programFraming.ts`, `programCrop.ts` | Zoom/pan y recorte por `cameraId`; gestos en `useProgramFramingGestures.ts` / `useProgramCropGestures.ts` |
+| `framingMotion.ts`, `useFramingMotion.ts` | Animación de presets (Acercar, Pan, Detalle, …) hacia `framingTargetRef` |
+| `programFramingPresets.ts`, `framingMotionPresetApply.ts` | Presets de fábrica + resolución con velocidad/intensidad |
+| `framingMotionPresetsStorage.ts` | Presets propios y sliders en `localStorage` |
+| `FusionProgramMotionTools.tsx`, `FloatingMotionPanel.tsx` | UI panel 🎮 Mov. (flotante, minimizable) |
+| `FusionProgramTools.tsx`, `ProgramCropOverlay.tsx` | Riel Zoom / Recorte en el programa |
+| `programScenes.ts`, `FusionSceneSwitcher.tsx` | Presets de escena (layout + fondo + crossfade) |
+| `StudioInlineDialog.tsx` | Formularios inline (sin `prompt`/`confirm` en Electron) |
+
+**Comportamiento clave (may 2026):** gestos de zoom/pan solo actualizan el **target**; el canvas interpola (`FRAMING_LERP_K`). Pan con “agarre” (signo invertido en deltas CSS). Encuadre **por cámara** al cambiar fuente en single. `useFramingMotion` debe exponer callbacks estables en deps de `useEffect` (no el objeto `framingMotion` entero).
+
+---
+
 ## Archivos tocados con más frecuencia
 
 | Área | Archivos |
 |------|-----------|
-| Fusión UI y grabación | `src/renderer/src/FusionPanel.tsx`, `src/renderer/src/index.css` |
+| Fusión UI y grabación | `src/renderer/src/FusionPanel.tsx`, `src/renderer/src/LiveFusionPanel.tsx`, `src/renderer/src/index.css` |
+| Programa / movimiento | `programFraming.ts`, `useFramingMotion.ts`, `FusionProgramMotionTools.tsx`, `FloatingMotionPanel.tsx` |
 | Convenciones de nombres ISO/fusion | `src/renderer/src/recordingFileNames.ts` |
 | IPC / FFmpeg | `electron/main/index.ts`, `electron/main/ffmpegConvert.ts` |
 | Preload API | `electron/preload/index.ts`, `src/renderer/src/global.d.ts` |

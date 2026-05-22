@@ -8,6 +8,7 @@ import {
 } from './programScenePresets'
 import type { ProgramBackground } from './programBackground'
 import type { LayoutAssignments, LayoutId, ProgramOrientation } from './programScenes'
+import { StudioConfirmForm, StudioPromptForm } from './StudioInlineDialog'
 import { btnNeutral } from './workspaceChrome'
 
 type Snapshot = {
@@ -18,6 +19,11 @@ type Snapshot = {
   background: ProgramBackground
 }
 
+type DialogState =
+  | { kind: 'save'; draft: string }
+  | { kind: 'delete'; id: string; name: string }
+  | null
+
 type Props = {
   disabled?: boolean
   getSnapshot: () => Snapshot
@@ -27,25 +33,26 @@ type Props = {
 
 export function FusionScenePresetsPanel({ disabled, getSnapshot, onApplyPreset, onStatus }: Props) {
   const [tick, setTick] = useState(0)
+  const [dialog, setDialog] = useState<DialogState>(null)
   const presets = useMemo(() => listScenePresets(), [tick])
 
   const refresh = () => setTick((t) => t + 1)
 
-  const onSave = () => {
-    const name = window.prompt('Nombre del preset de escena', 'Mi escena')
-    if (name == null) return
+  const submitSave = () => {
+    if (dialog?.kind !== 'save') return
     const snap = getSnapshot()
-    const p = saveScenePresetFromCurrent(name, snap)
+    const p = saveScenePresetFromCurrent(dialog.draft, snap)
     refresh()
     onStatus(`Preset guardado: «${p.name}».`)
+    setDialog(null)
   }
 
-  const onDelete = (id: string, name: string) => {
-    if (id.startsWith('builtin-')) return
-    if (!window.confirm(`¿Borrar el preset «${name}»?`)) return
-    deleteScenePreset(id)
+  const submitDelete = () => {
+    if (dialog?.kind !== 'delete') return
+    deleteScenePreset(dialog.id)
     refresh()
-    onStatus(`Preset «${name}» eliminado.`)
+    onStatus(`Preset «${dialog.name}» eliminado.`)
+    setDialog(null)
   }
 
   return (
@@ -65,6 +72,29 @@ export function FusionScenePresetsPanel({ disabled, getSnapshot, onApplyPreset, 
       >
         Presets de escena
       </div>
+
+      {dialog?.kind === 'save' ? (
+        <StudioPromptForm
+          label="Nombre del preset de escena"
+          value={dialog.draft}
+          disabled={disabled}
+          onChange={(draft) => setDialog({ kind: 'save', draft })}
+          onSubmit={submitSave}
+          onCancel={() => setDialog(null)}
+        />
+      ) : null}
+
+      {dialog?.kind === 'delete' ? (
+        <StudioConfirmForm
+          message={<>¿Borrar el preset «{dialog.name}»?</>}
+          submitLabel="Borrar"
+          danger
+          disabled={disabled}
+          onConfirm={submitDelete}
+          onCancel={() => setDialog(null)}
+        />
+      ) : null}
+
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
         {presets.map((p) => (
           <div key={p.id} style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
@@ -85,8 +115,8 @@ export function FusionScenePresetsPanel({ disabled, getSnapshot, onApplyPreset, 
             {!p.id.startsWith('builtin-') ? (
               <button
                 type="button"
-                disabled={disabled}
-                onClick={() => onDelete(p.id, p.name)}
+                disabled={disabled || dialog != null}
+                onClick={() => setDialog({ kind: 'delete', id: p.id, name: p.name })}
                 title="Borrar preset"
                 style={{
                   padding: '2px 6px',
@@ -105,8 +135,8 @@ export function FusionScenePresetsPanel({ disabled, getSnapshot, onApplyPreset, 
         ))}
         <button
           type="button"
-          disabled={disabled}
-          onClick={onSave}
+          disabled={disabled || dialog?.kind === 'save'}
+          onClick={() => setDialog({ kind: 'save', draft: 'Mi escena' })}
           style={{
             ...btnNeutral,
             padding: '4px 10px',

@@ -6,8 +6,8 @@ export type CamFraming = { zoom: number; offsetX: number; offsetY: number }
 
 export const FRAMING_NEUTRAL: CamFraming = { zoom: 1, offsetX: 0.5, offsetY: 0.5 }
 
-/** Suavizado del encuadre interpolado (~70–100 ms a 60 Hz). */
-export const FRAMING_LERP_K = 0.18
+/** Suavizado del encuadre interpolado en el canvas (gestos suavizan hacia el target). */
+export const FRAMING_LERP_K = 0.26
 
 export function clampFraming(f: CamFraming): CamFraming {
   return {
@@ -184,7 +184,7 @@ export function panFramingByCssDelta(params: {
   const z = Math.max(1, Math.min(4, cur.zoom))
   return clampFraming({
     ...cur,
-    offsetX: cur.offsetX + cssDxRatio / z,
-    offsetY: cur.offsetY + cssDyRatio / z
+    offsetX: cur.offsetX - cssDxRatio / z,
+    offsetY: cur.offsetY - cssDyRatio / z
   })
 }

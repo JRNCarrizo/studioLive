@@ -1,9 +1,4 @@
-import { CROP_FULL, drawCroppedFramedVideoInRect } from './programCrop'
-import { FRAMING_NEUTRAL } from './programFraming'
-import type { SlotRect } from './programScenes'
-import { getVideoFrameSize } from './videoFrameSize'
-
-export type ProgramBackgroundMode = 'color' | 'image' | 'camera'
+export type ProgramBackgroundMode = 'color' | 'image'
 export type ProgramBackgroundImageFit = 'cover' | 'contain'
 
 export type ProgramBackground = {
@@ -12,15 +7,13 @@ export type ProgramBackground = {
   color: string
   imageUrl: string | null
   imageFit: ProgramBackgroundImageFit
-  cameraId: string | null
 }
 
 export const DEFAULT_PROGRAM_BACKGROUND: ProgramBackground = {
   mode: 'color',
   color: '#000000',
   imageUrl: null,
-  imageFit: 'cover',
-  cameraId: null
+  imageFit: 'cover'
 }
 
 const STORAGE_KEY = 'studioLive.programBackground.v1'
@@ -53,13 +46,12 @@ function normalizeHexColor(raw: string): string {
 export function parseProgramBackground(raw: unknown): ProgramBackground {
   if (!raw || typeof raw !== 'object') return { ...DEFAULT_PROGRAM_BACKGROUND }
   const o = raw as Record<string, unknown>
-  const mode =
-    o.mode === 'image' || o.mode === 'camera' || o.mode === 'color' ? o.mode : 'color'
+  const rawMode = o.mode === 'image' || o.mode === 'camera' || o.mode === 'color' ? o.mode : 'color'
+  const mode: ProgramBackgroundMode = rawMode === 'camera' ? 'color' : rawMode === 'image' ? 'image' : 'color'
   const color = typeof o.color === 'string' ? normalizeHexColor(o.color) : '#000000'
   const imageUrl = typeof o.imageUrl === 'string' && o.imageUrl.length > 0 ? o.imageUrl : null
   const imageFit = o.imageFit === 'contain' ? 'contain' : 'cover'
-  const cameraId = typeof o.cameraId === 'string' && o.cameraId.length > 0 ? o.cameraId : null
-  return { mode, color, imageUrl, imageFit, cameraId }
+  return { mode, color, imageUrl, imageFit }
 }
 
 export function loadProgramBackground(): ProgramBackground {
@@ -158,9 +150,6 @@ export type DrawProgramBackgroundOptions = {
   cw: number
   ch: number
   background: ProgramBackground
-  getVideo?: (cameraId: string) => HTMLVideoElement | undefined
-  getStream?: (cameraId: string) => MediaStream | undefined
-  getRotateDeg?: (cameraId: string) => number
 }
 
 /** Limpia el frame (opaco). Evita “fantasmas” al mover slots con fondo vídeo/imagen. */
@@ -176,7 +165,7 @@ export function resetProgramCanvas(ctx: CanvasRenderingContext2D, cw: number, ch
 
 /** Pinta el fondo del programa (debajo de los slots). */
 export function drawProgramBackground(opts: DrawProgramBackgroundOptions): void {
-  const { ctx, cw, ch, background, getVideo, getStream, getRotateDeg } = opts
+  const { ctx, cw, ch, background } = opts
   const fallback = normalizeHexColor(background.color)
 
   if (background.mode === 'color') {
@@ -185,70 +174,27 @@ export function drawProgramBackground(opts: DrawProgramBackgroundOptions): void 
     return
   }
 
-  if (background.mode === 'image') {
-    const url = background.imageUrl
-    if (!url) {
-      ctx.fillStyle = fallback
-      ctx.fillRect(0, 0, cw, ch)
-      return
-    }
-    const img = getLoadedBackgroundImage(url)
-    if (!img) {
-      preloadProgramBackgroundImage(url)
-      ctx.fillStyle = fallback
-      ctx.fillRect(0, 0, cw, ch)
-      return
-    }
+  const url = background.imageUrl
+  if (!url) {
     ctx.fillStyle = fallback
     ctx.fillRect(0, 0, cw, ch)
-    try {
-      drawImageInCanvas(ctx, img, cw, ch, background.imageFit)
-    } catch {
-      ctx.fillStyle = fallback
-      ctx.fillRect(0, 0, cw, ch)
-    }
     return
   }
-
-  if (background.mode === 'camera' && background.cameraId && getVideo) {
-    const v = getVideo(background.cameraId)
-    if (!v || v.readyState < 1) {
-      ctx.fillStyle = fallback
-      ctx.fillRect(0, 0, cw, ch)
-      return
-    }
-    const stream = getStream?.(background.cameraId)
-    const { vw, vh } = getVideoFrameSize(v, stream)
-    if (!vw || !vh) {
-      ctx.fillStyle = fallback
-      ctx.fillRect(0, 0, cw, ch)
-      return
-    }
-    const rect: SlotRect = { x: 0, y: 0, w: cw, h: ch }
-    const rot = getRotateDeg?.(background.cameraId) ?? 0
-    try {
-      drawCroppedFramedVideoInRect(
-        ctx,
-        v,
-        rect,
-        CROP_FULL,
-        FRAMING_NEUTRAL,
-        rot,
-        1,
-        'cover',
-        undefined,
-        vw,
-        vh
-      )
-    } catch {
-      ctx.fillStyle = fallback
-      ctx.fillRect(0, 0, cw, ch)
-    }
+  const img = getLoadedBackgroundImage(url)
+  if (!img) {
+    preloadProgramBackgroundImage(url)
+    ctx.fillStyle = fallback
+    ctx.fillRect(0, 0, cw, ch)
     return
   }
-
   ctx.fillStyle = fallback
   ctx.fillRect(0, 0, cw, ch)
+  try {
+    drawImageInCanvas(ctx, img, cw, ch, background.imageFit)
+  } catch {
+    ctx.fillStyle = fallback
+    ctx.fillRect(0, 0, cw, ch)
+  }
 }
 
 export const PROGRAM_BACKGROUND_COLOR_PRESETS: { label: string; color: string }[] = [

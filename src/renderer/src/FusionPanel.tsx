@@ -4,9 +4,10 @@ import { useCameraAliases } from './cameraAliases'
 import { FloatingEqualizerPanel } from './FloatingEqualizerPanel'
 import {
   btnAudio,
-  btnNeutral,
+  workspaceActionRowLabel,
   workspaceEyebrow,
-  workspaceInnerCard
+  workspaceInnerCard,
+  workspaceToolbar
 } from './workspaceChrome'
 
 import {
@@ -16,7 +17,11 @@ import {
 } from './recordingFileNames'
 import { useFusionAudioGraph } from './useFusionAudioGraph'
 import { FusionProgramBackgroundTools } from './FusionProgramBackgroundTools'
+import { FloatingMotionPanel, FusionMotionTrigger } from './FloatingMotionPanel'
+import { StudioConfirmForm } from './StudioInlineDialog'
 import { FusionProgramTools } from './FusionProgramTools'
+import { loadFramingMotionSettings } from './framingMotionPresetsStorage'
+import { useFramingMotion } from './useFramingMotion'
 import { drawProgramBackground, resetProgramCanvas } from './programBackground'
 import { useProgramBackground } from './useProgramBackground'
 import { FusionSceneSwitcher } from './FusionSceneSwitcher'
@@ -224,6 +229,8 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
 
   /** Abre el panel flotante de EQ (aplica al audio que se graba en la fusión). */
   const [eqOpen, setEqOpen] = useState(false)
+  const [motionOpen, setMotionOpen] = useState(false)
+  const [closeSessionConfirm, setCloseSessionConfirm] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [programOrientation, setProgramOrientation] = useState<ProgramOrientation>('landscape')
@@ -683,7 +690,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
       if (!info) {
         if (isFusionExportFileName(name)) {
           setLoadErr(
-            'Ese archivo es una fusión ya exportada (fusion-*.webm). Acá cargá las pistas del paso 1: los cam-*.webm de cada cámara y, si tenés, el audio-*.webm � no el archivo fusion.'
+            'Ese archivo es un export (fusion-*.webm). Cargá pistas ISO: cam-*.webm y, si hay, audio-*.webm.'
           )
         } else {
           setLoadErr(`Archivo no reconocido (usá cam-* o audio-* de esta app): ${name}`)
@@ -695,7 +702,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
 
     const sessions = new Set(parsed.map((x) => x.info.session))
     if (sessions.size !== 1) {
-      setLoadErr('Todos los archivos tienen que ser de la misma sesión (mismo número en el nombre).')
+      setLoadErr('Todos los archivos deben ser de la misma sesión.')
       return
     }
     const sid = [...sessions][0]!
@@ -843,6 +850,21 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
     programFadeRef.current = { from: sourceFrom, to: targetSig, start: performance.now() }
   }, [currentSceneSig, programCrossfadeMs])
 
+  const framingMotion = useFramingMotion()
+  const {
+    motionLabel: framingMotionLabel,
+    cancelMotion: cancelFramingMotion,
+    playPresetById: playFramingPresetById,
+    tickMotion: tickFramingMotion
+  } = framingMotion
+
+  const setFramingTargetOnly = useCallback((cameraId: string, next: CamFraming) => {
+    const clamped = clampFraming(next)
+    framingTargetRef.current.set(cameraId, clamped)
+    framingCurrentRef.current.set(cameraId, clamped)
+    setFramingTick((n) => n + 1)
+  }, [])
+
   /**
    * Dibujo programa �  canvas (layouts multi-slot + recorte/zoom como Fusión en vivo).
    */
@@ -964,9 +986,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
         ctx: target,
         cw,
         ch,
-        background: programBackgroundRef.current,
-        getVideo: (id) => videoRefs.current.get(id),
-        getRotateDeg: (id) => manualRotateDeg[id] ?? 0
+        background: programBackgroundRef.current
       })
       const sc = parseSceneSignature(sig)
       const rects = resolveLayoutSlotRects(sc.layoutId, cw, ch, layoutGeometryRef.current[sc.layoutId])
@@ -989,6 +1009,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
     }
 
     const drawOnce = () => {
+      tickFramingMotion(setFramingTargetOnly)
       const cw = canvas.width
       const ch = canvas.height
       const targetSig = sceneSignature({
@@ -1039,7 +1060,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
       cancelled = true
       cancelAnimationFrame(rafId)
     }
-  }, [clips, manualRotateDeg, cropTick, programOrientation])
+  }, [clips, tickFramingMotion, manualRotateDeg, cropTick, programOrientation, setFramingTargetOnly])
 
   /** Lee el encuadre destino actual de la cámara visible (para mostrar % y reset). */
   const programFramingTarget = useMemo<CamFraming>(() => {
@@ -1049,12 +1070,27 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [programCameraId, framingTick])
 
-  const applyFraming = useCallback((cameraId: string, next: CamFraming) => {
-    const clamped = clampFraming(next)
-    framingTargetRef.current.set(cameraId, clamped)
-    framingCurrentRef.current.set(cameraId, clamped)
-    setFramingTick((n) => n + 1)
-  }, [])
+  const applyFraming = useCallback(
+    (cameraId: string, next: CamFraming) => {
+      cancelFramingMotion()
+      const clamped = clampFraming(next)
+      framingTargetRef.current.set(cameraId, clamped)
+      framingCurrentRef.current.set(cameraId, clamped)
+      setFramingTick((n) => n + 1)
+    },
+    [cancelFramingMotion]
+  )
+
+  /** Gestos (rueda, pellizco, arrastre): target al instante, dibujo interpolado en el canvas. */
+  const applyFramingGesture = useCallback(
+    (cameraId: string, next: CamFraming) => {
+      cancelFramingMotion()
+      const clamped = clampFraming(next)
+      framingTargetRef.current.set(cameraId, clamped)
+      setFramingTick((n) => n + 1)
+    },
+    [cancelFramingMotion]
+  )
 
   const updateFramingTarget = useCallback(
     (cameraId: string, mutator: (cur: CamFraming) => CamFraming) => {
@@ -1081,6 +1117,29 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
   const programRotateDeg = programCameraId ? (manualRotateDeg[programCameraId] ?? 0) : 0
   const framingEditable = programLayoutId === 'single' && programCameraId != null
   const layoutEditable = programLayoutId !== 'single'
+
+  useEffect(() => {
+    cancelFramingMotion()
+  }, [programCameraId, cancelFramingMotion])
+
+  useEffect(() => {
+    if (!framingEditable || !programCameraId) setMotionOpen(false)
+  }, [framingEditable, programCameraId])
+
+  const playFramingMotion = useCallback(
+    (presetId: string) => {
+      if (!programCameraId) return
+      const { speed, intensity } = loadFramingMotionSettings()
+      playFramingPresetById(
+        programCameraId,
+        presetId,
+        () => framingTargetRef.current.get(programCameraId) ?? FRAMING_NEUTRAL,
+        setFramingTargetOnly,
+        { speed, intensity, framingNeutral: FRAMING_NEUTRAL }
+      )
+    },
+    [playFramingPresetById, programCameraId, setFramingTargetOnly]
+  )
 
   const activeLayoutGeometry = useMemo((): NormalizedSlotRect[] => {
     const dim = CANVAS_DIMS[programOrientation]
@@ -1174,7 +1233,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
     getVideo: (id) => videoRefs.current.get(id),
     getCrop: (id) => cropTargetRef.current.get(id) ?? CROP_FULL,
     getFraming: (id) => framingTargetRef.current.get(id) ?? FRAMING_NEUTRAL,
-    applyFraming,
+    applyFramingGesture,
     rotateDeg: programRotateDeg,
     programDragRef
   })
@@ -1212,9 +1271,9 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
         cur,
         rotateDeg: programRotateDeg
       })
-      applyFraming(programCameraId, next)
+      applyFramingGesture(programCameraId, next)
     },
-    [applyFraming, cropEditOpen, programCameraId, programRotateDeg]
+    [applyFramingGesture, cropEditOpen, programCameraId, programRotateDeg]
   )
 
   const onProgramMouseUp = useCallback(() => {
@@ -1534,11 +1593,11 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
     }
     const empty = !clips.length && !audioUrl && !fusionPreviewUrl && !sessionId
     if (empty) return
-    const ok = window.confirm(
-      '¿Cerrar la sesión cargada en Fusión?\n\nSe descartan las pistas, el plan de cámara y la vista previa.\nLos archivos ya guardados en disco NO se borran.'
-    )
-    if (!ok) return
+    setCloseSessionConfirm(true)
+  }, [audioUrl, clips.length, fusionExportBusy, fusionPreviewUrl, fusionRecording, onStatus, sessionId])
 
+  const doCloseFusionSession = useCallback(() => {
+    setCloseSessionConfirm(false)
     pauseAll()
     if (fusionPreviewUrl) {
       try {
@@ -1567,16 +1626,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
     videoRefs.current.clear()
     thumbVideoRefs.current.clear()
     onStatus('Sesión de fusión cerrada.')
-  }, [
-    audioUrl,
-    clips.length,
-    fusionExportBusy,
-    fusionPreviewUrl,
-    fusionRecording,
-    onStatus,
-    pauseAll,
-    sessionId
-  ])
+  }, [audioUrl, clips.length, fusionPreviewUrl, onStatus, pauseAll, sessionId])
 
   const discardFusionPreview = useCallback(() => {
     fusionPreviewBlobRef.current = null
@@ -1617,7 +1667,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
 
   const startFusionRecord = useCallback(async () => {
     if (!outputDir) {
-      onStatus('Elegí carpeta de grabación antes de exportar la fusión.')
+      onStatus('Elegí «Carpeta de grabación» en la barra superior antes de grabar o exportar.')
       return
     }
     if (!clips.length || !canvasRef.current) return
@@ -1765,56 +1815,86 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
 
   return (
     <div style={workspaceInnerCard}>
-      <div style={workspaceEyebrow}>Paso 2 · Fusión con archivos (mezcla las pistas grabadas en el paso 1)</div>
-      <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.45 }}>
-        Cuando ya tengas guardados los archivos del paso 1, cargá los <code style={{ color: '#cbd5e1' }}>cam-*.webm</code>{' '}
-        de una misma sesión y, si grabaste, <code style={{ color: '#cbd5e1' }}>audio-*.webm</code>. Reproducí, elegí qué
-        cámara va al programa y grabá la mezcla. No cargues aquí el archivo <code style={{ color: '#cbd5e1' }}>fusion-*.webm</code>{' '}
-        (eso es solo el resultado exportado). En Windows, si la carpeta parece vacía, abrí «Tipo de archivo» en el
-        explorador y elegí «Todos los archivos».
-      </div>
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-        <button
-          type="button"
-          disabled={liveRecording}
-          onClick={() => void loadIsoFiles()}
-          style={{
-            padding: '8px 12px',
-            borderRadius: 8,
-            border: '1px solid #334155',
-            background: '#0f172a',
-            color: '#e2e8f0'
-          }}
-        >
-          Cargar pistas WebM{GLYPH.ellipsis}
-        </button>
-        <button
-          type="button"
-          onClick={() => setEqOpen((v) => !v)}
-          disabled={!audioUrl}
-          title={
-            audioUrl
-              ? 'Abre el ecualizador flotante (se aplica al audio antes de grabar la fusión).'
-              : 'Cargá una sesión con audio (audio-*.webm) para usar el EQ.'
+      {closeSessionConfirm ? (
+        <StudioConfirmForm
+          message={
+            <>
+              ¿Cerrar esta sesión de fusión?
+              <br />
+              <br />
+              Se quitan las pistas cargadas, el plan y la vista previa. Lo guardado en disco{' '}
+              <strong>no</strong> se borra.
+            </>
           }
-          style={{
-            ...btnAudio,
-            opacity: audioUrl ? 1 : 0.5,
-            cursor: audioUrl ? 'pointer' : 'not-allowed'
-          }}
-        >
-          <span aria-hidden style={{ fontSize: 14 }}>{GLYPH.eq}</span>
-          {audioGraph.gains.some((g) => Math.abs(g) > 0.05) && !audioGraph.bypass
-            ? ' EQ · activo'
-            : ' EQ'}
-        </button>
-        {sessionId !== null ? (
-          <span style={{ fontSize: 12, color: '#86efac' }}>Sesión {sessionId}</span>
-        ) : null}
-      </div>
+          submitLabel="Cerrar sesión"
+          danger
+          onConfirm={doCloseFusionSession}
+          onCancel={() => setCloseSessionConfirm(false)}
+        />
+      ) : null}
 
-      {loadErr ? <div style={{ fontSize: 12, color: '#fca5a5' }}>{loadErr}</div> : null}
+      <div style={workspaceToolbar('violet')}>
+        <div style={workspaceEyebrow}>Fusión con archivos</div>
+        {clips.length === 0 ? (
+          <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.55, maxWidth: 640 }}>
+            Cargá las pistas guardadas en <strong style={{ color: '#e2e8f0' }}>Sesión en vivo</strong>:{' '}
+            <code style={{ color: '#cbd5e1' }}>cam-*.webm</code> por cámara y, si hay,{' '}
+            <code style={{ color: '#cbd5e1' }}>audio-*.webm</code>. Armá el programa, reproducí y grabá la mezcla.
+          </div>
+        ) : (
+          <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.45 }}>
+            Sesión <strong style={{ color: '#86efac' }}>{sessionId}</strong> cargada — elegí cámaras al programa y usá la
+            barra de abajo para reproducir o grabar.
+          </div>
+        )}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+          <span style={workspaceActionRowLabel}>{clips.length === 0 ? 'Empezar' : 'Pistas'}</span>
+          <button
+            type="button"
+            disabled={liveRecording}
+            onClick={() => void loadIsoFiles()}
+            title="Elegí los cam-*.webm (y audio-*.webm) de una misma sesión en la carpeta de grabación."
+            style={{
+              padding: '8px 14px',
+              borderRadius: 8,
+              border: '1px solid #7c3aed',
+              background: liveRecording ? '#334155' : '#4c1d95',
+              color: '#ede9fe',
+              fontWeight: 700,
+              fontSize: 12,
+              cursor: liveRecording ? 'not-allowed' : 'pointer',
+              opacity: liveRecording ? 0.55 : 1
+            }}
+          >
+            {clips.length === 0 ? `Cargar pistas WebM${GLYPH.ellipsis}` : `Cambiar pistas${GLYPH.ellipsis}`}
+          </button>
+          <button
+            type="button"
+            onClick={() => setEqOpen((v) => !v)}
+            disabled={!audioUrl}
+            title={
+              audioUrl
+                ? 'Ecualizador del audio de la mezcla (afecta la grabación).'
+                : 'Necesitás audio-*.webm en la sesión cargada.'
+            }
+            style={{
+              ...btnAudio,
+              opacity: audioUrl ? 1 : 0.5,
+              cursor: audioUrl ? 'pointer' : 'not-allowed'
+            }}
+          >
+            <span aria-hidden style={{ fontSize: 14 }}>{GLYPH.eq}</span>
+            {audioGraph.gains.some((g) => Math.abs(g) > 0.05) && !audioGraph.bypass ? ' EQ · activo' : ' EQ'}
+          </button>
+        </div>
+        {clips.length === 0 ? (
+          <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.45 }}>
+            Misma sesión en todos los archivos · no <code style={{ color: '#94a3b8' }}>fusion-*.webm</code> · en Windows,
+            «Todos los archivos» si no ves los WebM
+          </div>
+        ) : null}
+        {loadErr ? <div style={{ fontSize: 12, color: '#fca5a5' }}>{loadErr}</div> : null}
+      </div>
 
       {audioUrl ? (
         <div
@@ -1836,23 +1916,11 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
       {clips.length > 0 ? (
         <div className="fusion-workspace">
           <div className="fusion-program-heading">
-            <div style={{ textAlign: 'center', margin: '0 auto', maxWidth: 560 }}>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>Programa (salida)</div>
+            <div style={{ textAlign: 'center', margin: '0 auto', maxWidth: 520 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: '#e2e8f0' }}>Programa</div>
               <div style={{ fontSize: 11, color: '#64748b', marginTop: 4, lineHeight: 1.45 }}>
-                Mezcla de las grabaciones cargadas. Elegí la escena con la barra izquierda del programa y las
-                cámaras en las fuentes a la derecha.
-                {programLayoutId === 'single' ? (
-                  <>
-                    {' '}
-                    <strong>Recorte</strong> / <strong>Zoom</strong>: pellizco y mover a la vez (sin
-                    soltar); clic y arrastrar en zoom.
-                  </>
-                ) : (
-                  <>
-                    {' '}
-                    En multi-cámara: tocá un recuadro en el programa y asigná con la miniatura.
-                  </>
-                )}
+                Escena a la izquierda · fuentes a la derecha · miniatura = al aire.
+                {programLayoutId !== 'single' ? ' En multi-cámara: tocá un recuadro del programa y asigná fuente.' : null}
               </div>
             </div>
 
@@ -1918,9 +1986,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
                 </button>
               ) : null}
             </div>
-            <div className="fusion-program-heading-sources">
-              Fuentes (tocá = al programa)
-            </div>
+            <div className="fusion-program-heading-sources">Fuentes</div>
           </div>
 
           <div className="fusion-stage">
@@ -2064,20 +2130,26 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
                   <aside className="fusion-program-rail fusion-program-rail--right">
                     <FusionProgramBackgroundTools
                       background={programBackground}
-                      cameraIds={clips.map((c) => c.cameraId)}
-                      resolveAlias={cameraAliases.resolve}
                       onBackgroundChange={setProgramBackground}
                     />
                     {framingEditable && programCameraId ? (
-                      <FusionProgramTools
-                        cropEditOpen={cropEditOpen}
-                        programCrop={programCrop}
-                        programFramingTarget={programFramingTarget}
-                        framingNeutral={FRAMING_NEUTRAL}
-                        onToggleCropEdit={toggleCropEdit}
-                        onResetCrop={() => resetCrop(programCameraId)}
-                        onResetFraming={() => resetFraming(programCameraId)}
-                      />
+                      <>
+                        <FusionProgramTools
+                          cropEditOpen={cropEditOpen}
+                          programCrop={programCrop}
+                          programFramingTarget={programFramingTarget}
+                          framingNeutral={FRAMING_NEUTRAL}
+                          onToggleCropEdit={toggleCropEdit}
+                          onResetCrop={() => resetCrop(programCameraId)}
+                          onResetFraming={() => resetFraming(programCameraId)}
+                        />
+                        <FusionMotionTrigger
+                          active={motionOpen}
+                          disabled={cropEditOpen}
+                          playing={framingMotionLabel != null}
+                          onClick={() => setMotionOpen((v) => !v)}
+                        />
+                      </>
                     ) : null}
                   </aside>
                 ) : null}
@@ -2242,21 +2314,19 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
                       background: '#0c121c'
                     }}
                   >
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0', marginBottom: 8 }}>
-                      Vista previa del archivo grabado
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0', marginBottom: 6 }}>
+                      Vista previa
                     </div>
                     <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8, lineHeight: 1.4 }}>
-                      En la barra de abajo, «Play» con vista previa activa solo mueve el WebM exportado; la
-                      mezcla del programa no se reproduce con ese botón. La barra de tiempo controla las pistas cargadas;
-                      si movés el tiempo, la vista previa salta al mismo instante relativo. Pantalla completa / Esc.
-                      {' '}
-                      Podés guardar WebM (rápido) o MP4 H.264 (mejor en el Reproductor de Windows / barra de tiempo).
+                      Play solo reproduce esta toma. La línea de tiempo de abajo mueve las pistas y sincroniza la
+                      vista previa. <strong>MP4</strong> suele ir mejor en el Reproductor de Windows; WebM es más rápido
+                      al guardar.
                     </div>
                     <label
                       htmlFor="fusion-export-filename"
                       style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}
                     >
-                      Nombre del archivo (el mismo base sirve para WebM y MP4)
+                      Nombre de archivo
                     </label>
                     <input
                       id="fusion-export-filename"
@@ -2376,7 +2446,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
                             <span className="studio-spinner" aria-hidden /> Generando MP4{GLYPH.ellipsis}
                           </>
                         ) : (
-                          'Guardar MP4 (recomendado Windows)'
+                          'Guardar MP4'
                         )}
                       </button>
                       <button
@@ -2421,8 +2491,8 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
                                 : `Guardando WebM${GLYPH.ellipsis}`}
                             </strong>{' '}
                             {fusionExportTarget === 'mp4'
-                              ? 'FFmpeg está re-codificando a H.264. Puede tardar bastante según la duración (no cierres la app).'
-                              : 'Escribiendo el archivo en la carpeta de grabación.'}
+                              ? 'Convirtiendo a H.264 (puede tardar; no cierres la app).'
+                              : 'Guardando en la carpeta de grabación…'}
                           </div>
                           <span
                             style={{
@@ -2489,10 +2559,9 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
               }}
             >
               <div>
-                <div style={{ fontSize: 13, fontWeight: 700 }}>Configuración por formato</div>
+                <div style={{ fontSize: 13, fontWeight: 700 }}>Formatos y orientación</div>
                 <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2, lineHeight: 1.45 }}>
-                  Elegí qué grabaciones van en cada formato y la orientación de salida. Los botones de la barra
-                  izquierda del programa aplican cada formato a la mezcla.
+                  Asigná cámaras a cada layout. Los botones del programa aplican el formato al aire.
                 </div>
               </div>
               <button
@@ -2516,7 +2585,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
 
             {!clips.length ? (
               <div style={{ fontSize: 11, color: '#94a3b8', padding: '12px 0' }}>
-                Cargá las grabaciones cam-*.webm para configurar los formatos.
+                Cargá pistas primero.
               </div>
             ) : (
               <>
@@ -2758,6 +2827,22 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
         onClose={() => setEqOpen(false)}
         graph={audioGraph}
         fusionRecording={fusionRecording}
+      />
+
+      <FloatingMotionPanel
+        open={motionOpen && framingEditable && programCameraId != null}
+        onClose={() => setMotionOpen(false)}
+        disabled={cropEditOpen}
+        motionLabel={framingMotionLabel}
+        framingNeutral={FRAMING_NEUTRAL}
+        getCurrentFraming={() =>
+          programCameraId
+            ? (framingTargetRef.current.get(programCameraId) ?? FRAMING_NEUTRAL)
+            : FRAMING_NEUTRAL
+        }
+        onPlay={playFramingMotion}
+        onStop={cancelFramingMotion}
+        onStatus={onStatus}
       />
     </div>
   )

@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useRef, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
+import { StudioConfirmForm } from './StudioInlineDialog'
 import { btnNeutral } from './workspaceChrome'
 
 const PC_AUDIO_RECORDER_KEY = 'pc-audio'
@@ -27,10 +28,28 @@ type Props = {
   active: PreviewActive
   /** URL blob de la pista `audio-*.webm` de la misma sesión, para escucharla junto al vídeo de cada cámara. */
   pcAudioPreviewUrl: string | null
-  stageRef: RefObject<HTMLDivElement | null>
-  stageFullscreen: boolean
-  onToggleStageFullscreen: () => void
   resolveAlias: AliasResolver
+}
+
+const ISO_PREVIEW_MAX_H = 220
+
+/** Mismo glifo que la barra de controles del video (expandir / salir). */
+function IsoPreviewFsIcon({ expanded }: { expanded: boolean }) {
+  if (expanded) {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden>
+        <path d="M5 16h3v3H5v-3zm11 0h3v3h-3v-3zM5 5h3v3H5V5zm11 0h3v3h-3V5z" fill="currentColor" />
+      </svg>
+    )
+  }
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden>
+      <path
+        d="M7 14H5v5h5v-2H7v-3zm12 0h-2v3h-3v2h5v-5zM14 5h-3V2H5v5h2V5h7zm-4 0H5v3h5V5z"
+        fill="currentColor"
+      />
+    </svg>
+  )
 }
 
 function clampTime(t: number, duration: number): number {
@@ -49,14 +68,106 @@ export function IsoRecordingReviewOverlay({
   onSelectKey,
   active,
   pcAudioPreviewUrl,
-  stageRef,
-  stageFullscreen,
-  onToggleStageFullscreen,
   resolveAlias
 }: Props) {
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
+  const [previewExpanded, setPreviewExpanded] = useState(false)
   const videoRef = useRef<HTMLVideoElement | null>(null)
+  const previewWrapRef = useRef<HTMLDivElement | null>(null)
   const pcAudioSyncRef = useRef<HTMLAudioElement | null>(null)
   const lastNudgeMsRef = useRef(0)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+
+  const clearNativeVideoPresentation = useCallback(async () => {
+    const vid = videoRef.current as
+      | (HTMLVideoElement & {
+          webkitDisplayingFullscreen?: boolean
+          webkitExitFullscreen?: () => void
+        })
+      | null
+    try {
+      if (document.pictureInPictureElement) await document.exitPictureInPicture()
+    } catch {
+      /* vacío */
+    }
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen()
+    } catch {
+      /* vacío */
+    }
+    if (vid?.webkitDisplayingFullscreen && vid.webkitExitFullscreen) {
+      try {
+        vid.webkitExitFullscreen()
+      } catch {
+        /* vacío */
+      }
+    }
+  }, [])
+
+  const exitPreviewFullscreen = useCallback(async () => {
+    setPreviewExpanded(false)
+    await clearNativeVideoPresentation()
+  }, [clearNativeVideoPresentation])
+
+  /** Pantalla completa a viewport (CSS). La API nativa del video en Electron suele quedar mini en una esquina. */
+  const enterPreviewFullscreen = useCallback(async () => {
+    await clearNativeVideoPresentation()
+    setPreviewExpanded(true)
+  }, [clearNativeVideoPresentation])
+
+  const togglePreviewFullscreen = useCallback(async () => {
+    if (previewExpanded) {
+      await exitPreviewFullscreen()
+      return
+    }
+    await enterPreviewFullscreen()
+  }, [previewExpanded, enterPreviewFullscreen, exitPreviewFullscreen])
+
+  useEffect(() => {
+    setConfirmDiscard(false)
+    setPreviewError(null)
+    void exitPreviewFullscreen()
+  }, [selectedKey, active?.item.recKey, active?.url, exitPreviewFullscreen])
+
+  useEffect(() => {
+    const vid = videoRef.current
+    if (!vid) return
+
+    const sync = () => {
+      const el = document.fullscreenElement
+      if (el === vid || document.pictureInPictureElement === vid) {
+        void enterPreviewFullscreen()
+      }
+    }
+
+    const onWebkitBegin = () => void enterPreviewFullscreen()
+    const onEnterPip = () => void enterPreviewFullscreen()
+
+    document.addEventListener('fullscreenchange', sync)
+    vid.addEventListener('fullscreenchange', sync)
+    vid.addEventListener('webkitbeginfullscreen', onWebkitBegin)
+    vid.addEventListener('enterpictureinpicture', onEnterPip)
+    return () => {
+      document.removeEventListener('fullscreenchange', sync)
+      vid.removeEventListener('fullscreenchange', sync)
+      vid.removeEventListener('webkitbeginfullscreen', onWebkitBegin)
+      vid.removeEventListener('enterpictureinpicture', onEnterPip)
+    }
+  }, [active?.item.recKey, active?.url, enterPreviewFullscreen])
+
+  useEffect(() => {
+    if (!previewExpanded) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') void exitPreviewFullscreen()
+    }
+    window.addEventListener('keydown', onKey)
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      document.body.style.overflow = prevOverflow
+    }
+  }, [previewExpanded, exitPreviewFullscreen])
 
   const syncPcAudioTime = useCallback(() => {
     const v = videoRef.current
@@ -146,11 +257,29 @@ export function IsoRecordingReviewOverlay({
         inset: 0,
         zIndex: 10000,
         display: 'flex',
-        flexDirection: 'column',
-        background: '#020617',
-        overflow: 'hidden'
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 16,
+        background: 'rgba(2, 6, 23, 0.88)',
+        backdropFilter: 'blur(4px)',
+        overflow: 'auto'
       }}
     >
+      <div
+        style={{
+          width: 'min(720px, 100%)',
+          maxHeight: 'calc(100vh - 32px)',
+          display: 'flex',
+          flexDirection: 'column',
+          borderRadius: 12,
+          border: '1px solid #334155',
+          background: '#0f172a',
+          boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.55)',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          margin: 'auto 0'
+        }}
+      >
       <div
         style={{
           flexShrink: 0,
@@ -163,8 +292,13 @@ export function IsoRecordingReviewOverlay({
           background: '#0f172a'
         }}
       >
-        <div id="iso-save-title" style={{ fontSize: 15, fontWeight: 700, color: '#e2e8f0' }}>
-          Grabación terminada
+        <div style={{ flex: '1 1 200px', minWidth: 0 }}>
+          <div id="iso-save-title" style={{ fontSize: 15, fontWeight: 700, color: '#e2e8f0' }}>
+            Grabación terminada
+          </div>
+          <p style={{ margin: '4px 0 0', fontSize: 12, color: '#94a3b8', lineHeight: 1.4 }}>
+            Revisá cada toma, elegí el nombre de carpeta y guardá en disco, o descartá si no la querés.
+          </p>
         </div>
         <label htmlFor="iso-preview-take" style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>
           Toma
@@ -190,36 +324,57 @@ export function IsoRecordingReviewOverlay({
             </option>
           ))}
         </select>
+        <span style={{ flex: '1 1 40px' }} />
         <button
           type="button"
-          onClick={() => onToggleStageFullscreen()}
+          onClick={() => setConfirmDiscard(true)}
+          disabled={confirmDiscard}
           style={{ ...btnNeutral, fontWeight: 600, fontSize: 12 }}
         >
-          {stageFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
-        </button>
-        <span style={{ flex: '1 1 40px' }} />
-        <button type="button" onClick={() => onDiscard()} style={{ ...btnNeutral, fontWeight: 600, fontSize: 12 }}>
           Descartar
         </button>
       </div>
 
+      {confirmDiscard ? (
+        <div style={{ flexShrink: 0, padding: '0 14px 10px' }}>
+          <StudioConfirmForm
+            message="¿Descartar esta grabación? No se guardará ningún archivo."
+            submitLabel="Descartar"
+            danger
+            onConfirm={() => {
+              setConfirmDiscard(false)
+              onDiscard()
+            }}
+            onCancel={() => setConfirmDiscard(false)}
+          />
+        </div>
+      ) : null}
+
       <div
-        ref={stageRef}
         style={{
-          flex: '1 1 auto',
-          minHeight: 0,
+          flex: '0 0 auto',
+          height: ISO_PREVIEW_MAX_H,
+          maxHeight: ISO_PREVIEW_MAX_H,
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          background: '#000',
-          padding: 12,
-          gap: 8,
-          position: 'relative'
+          background: '#0b1220',
+          padding: '8px 12px',
+          gap: 6,
+          position: 'relative',
+          borderTop: '1px solid #1e293b',
+          borderBottom: '1px solid #1e293b',
+          overflow: 'visible',
+          boxSizing: 'border-box'
         }}
       >
         {!active?.url ? (
-          <span style={{ color: '#64748b', fontSize: 13 }}>Preparando vista previa…</span>
+          <span style={{ color: '#94a3b8', fontSize: 13 }}>Preparando vista previa…</span>
+        ) : previewError ? (
+          <span style={{ color: '#fca5a5', fontSize: 13, textAlign: 'center', maxWidth: 420, padding: '0 12px' }}>
+            {previewError}
+          </span>
         ) : active.isAudio ? (
           <audio
             key={active.item.recKey}
@@ -229,7 +384,21 @@ export function IsoRecordingReviewOverlay({
             style={{ width: 'min(720px, 100%)', minHeight: 48 }}
           />
         ) : (
-          <>
+          <div
+            ref={previewWrapRef}
+            className={
+              'iso-preview-wrap' + (previewExpanded ? ' iso-preview-wrap--expanded' : '')
+            }
+          >
+            {previewExpanded ? (
+              <button
+                type="button"
+                className="iso-preview-fs-exit-hint"
+                onClick={() => void exitPreviewFullscreen()}
+              >
+                Esc o clic aquí para volver
+              </button>
+            ) : null}
             {showLinkedPcAudio ? (
               <audio
                 ref={pcAudioSyncRef}
@@ -252,62 +421,54 @@ export function IsoRecordingReviewOverlay({
             <video
               ref={videoRef}
               key={active.item.recKey}
+              className="iso-preview-video"
               controls
+              controlsList="nodownload noremoteplayback nofullscreen"
+              disablePictureInPicture
               playsInline
               muted={false}
               preload="metadata"
               src={active.url}
+              onError={() =>
+                setPreviewError(
+                  'No se pudo reproducir esta toma (archivo vacío o formato no soportado). Podés guardar en disco e intentar abrir el .webm desde la carpeta.'
+                )
+              }
               onPlay={showLinkedPcAudio ? onVideoPlay : undefined}
               onPause={showLinkedPcAudio ? onVideoPause : undefined}
               onSeeking={showLinkedPcAudio ? onVideoSeeking : undefined}
               onSeeked={showLinkedPcAudio ? onVideoSeeked : undefined}
               onRateChange={showLinkedPcAudio ? onVideoRateChange : undefined}
               onTimeUpdate={showLinkedPcAudio ? onVideoTimeUpdate : undefined}
-              style={{
-                width: '100%',
-                height: '100%',
-                maxWidth: '100%',
-                maxHeight: '100%',
-                objectFit: 'contain',
-                outline: 'none'
-              }}
             />
-            {active && !active.isAudio && !pcAudioPreviewUrl ? (
-              <div style={{ fontSize: 11, color: '#64748b', textAlign: 'center', maxWidth: 520 }}>
-                Esta sesión no tiene pista «Audio de PC» (no estaba activo al grabar). Solo se escucha el vídeo.
-              </div>
-            ) : null}
-            {showLinkedPcAudio ? (
-              <div style={{ fontSize: 11, color: '#86efac', textAlign: 'center', maxWidth: 560 }}>
-                Al usar ▶ del vídeo, el <strong style={{ color: '#bbf7d0' }}>audio de PC</strong> de la misma grabación se
-                reproduce en paralelo (mismo tiempo aprox.; puede desfasarse un poco al final).
-              </div>
-            ) : null}
-          </>
+            <button
+              type="button"
+              className="iso-preview-fs-btn"
+              onClick={() => void togglePreviewFullscreen()}
+              aria-label={previewExpanded ? 'Salir de pantalla completa' : 'Pantalla completa'}
+              title={previewExpanded ? 'Salir de pantalla completa (Esc)' : 'Pantalla completa'}
+            >
+              <IsoPreviewFsIcon expanded={previewExpanded} />
+            </button>
+          </div>
         )}
       </div>
 
       <div
         style={{
           flexShrink: 0,
-          padding: '10px 14px 14px',
-          borderTop: '1px solid #1e293b',
+          padding: '12px 14px 14px',
+          borderTop: '1px solid #334155',
           background: '#0f172a'
         }}
       >
-        <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.5, marginBottom: 10 }}>
-          <strong style={{ color: '#cbd5e1' }}>{active?.label ?? '—'}</strong>
-          {' · '}
-          Los archivos <strong style={{ color: '#cbd5e1' }}>no están en disco</strong> hasta «Guardar en disco». Las tomas
-          de cámara son <strong style={{ color: '#cbd5e1' }}>solo vídeo</strong>; el audio de la PC va en el archivo{' '}
-          <strong style={{ color: '#cbd5e1' }}>Audio de PC</strong>. En la vista previa de una cámara, si hubo audio de PC,
-          se mezcla al reproducir el vídeo (arriba).
-        </div>
-        <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 8, lineHeight: 1.45 }}>
-          Subcarpeta dentro de <span style={{ color: '#cbd5e1', wordBreak: 'break-all' }}>{outputDir ?? '—'}</span>. No
-          podés repetir un nombre si ya existe una carpeta igual con <code style={{ color: '#cbd5e1' }}>.webm</code>.
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'stretch' }}>
+        <label
+          htmlFor="iso-folder-name"
+          style={{ display: 'block', fontSize: 11, color: '#94a3b8', fontWeight: 600, marginBottom: 6 }}
+        >
+          Nombre de la carpeta (subcarpeta en tu carpeta de grabación)
+        </label>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'stretch', marginBottom: 10 }}>
           <input
             id="iso-folder-name"
             type="text"
@@ -322,7 +483,7 @@ export function IsoRecordingReviewOverlay({
             }}
             placeholder="nombre de carpeta"
             style={{
-              flex: '1 1 220px',
+              flex: '1 1 200px',
               minWidth: 0,
               padding: '10px 12px',
               borderRadius: 8,
@@ -340,17 +501,27 @@ export function IsoRecordingReviewOverlay({
               flex: '0 0 auto',
               padding: '10px 20px',
               borderRadius: 8,
-              border: '1px solid #15803d',
-              background: '#166534',
-              color: '#ecfccb',
+              border: '1px solid #22c55e',
+              background: '#16a34a',
+              color: '#fff',
               fontWeight: 700,
               cursor: 'pointer',
-              fontSize: 13
+              fontSize: 14
             }}
           >
             Guardar en disco
           </button>
         </div>
+        <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.5, marginBottom: 6 }}>
+          <strong style={{ color: '#cbd5e1' }}>{active?.label ?? '—'}</strong>
+          {' · '}
+          Los archivos <strong style={{ color: '#cbd5e1' }}>no están en disco</strong> hasta guardar. Las cámaras son solo
+          vídeo; el audio de PC va aparte.
+        </div>
+        <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.45, wordBreak: 'break-all' }}>
+          Carpeta base: {outputDir ?? '—'}
+        </div>
+      </div>
       </div>
     </div>
   )

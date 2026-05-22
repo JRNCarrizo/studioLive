@@ -22,7 +22,7 @@ const BUILTIN: ScenePreset[] = [
     layoutAssignments: { single: [null] },
     programOrientation: 'landscape',
     programCrossfadeMs: 420,
-    background: { mode: 'color', color: '#000000', imageUrl: null, imageFit: 'cover', cameraId: null },
+    background: { mode: 'color', color: '#000000', imageUrl: null, imageFit: 'cover' },
     createdAt: 0
   },
   {
@@ -32,7 +32,7 @@ const BUILTIN: ScenePreset[] = [
     layoutAssignments: { pip: [null, null] },
     programOrientation: 'landscape',
     programCrossfadeMs: 420,
-    background: { mode: 'color', color: '#000000', imageUrl: null, imageFit: 'cover', cameraId: null },
+    background: { mode: 'color', color: '#000000', imageUrl: null, imageFit: 'cover' },
     createdAt: 0
   },
   {
@@ -42,7 +42,7 @@ const BUILTIN: ScenePreset[] = [
     layoutAssignments: { grid2x2: [null, null, null, null] },
     programOrientation: 'landscape',
     programCrossfadeMs: 420,
-    background: { mode: 'color', color: '#000000', imageUrl: null, imageFit: 'cover', cameraId: null },
+    background: { mode: 'color', color: '#000000', imageUrl: null, imageFit: 'cover' },
     createdAt: 0
   }
 ]

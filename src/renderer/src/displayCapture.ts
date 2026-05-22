@@ -45,8 +45,8 @@ export function configureDisplayCaptureVideoTrack(track: MediaStreamTrack): void
     .catch(() => {})
 }
 
-/** Stream de escritorio vía `desktopCapturer` (Electron); no usa `getDisplayMedia`. */
-export async function acquireDesktopStreamFromSourceId(sourceId: string): Promise<MediaStream> {
+/** Ruta antigua Chromium/Electron (chromeMediaSource). */
+async function acquireDesktopStreamLegacy(sourceId: string): Promise<MediaStream> {
   const constraints: MediaStreamConstraints = {
     audio: false,
     video: {
@@ -56,6 +56,8 @@ export async function acquireDesktopStreamFromSourceId(sourceId: string): Promis
         chromeMediaSourceId: sourceId,
         minFrameRate: 15,
         maxFrameRate: 30,
+        minWidth: 640,
+        minHeight: 360,
         maxWidth: 1920,
         maxHeight: 1080
       }
@@ -65,4 +67,61 @@ export async function acquireDesktopStreamFromSourceId(sourceId: string): Promis
   const vt = stream.getVideoTracks()[0]
   if (vt) configureDisplayCaptureVideoTrack(vt)
   return stream
+}
+
+function isWindows(): boolean {
+  return typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent)
+}
+
+export type AcquireDesktopOptions = {
+  /** Forzar ruta chromiumMediaSource (a veces mueve YouTube cuando getDisplayMedia queda congelado). */
+  forceLegacy?: boolean
+}
+
+/**
+ * En Windows + monitor completo, probamos primero la ruta legacy: con YouTube en Chrome
+ * getDisplayMedia/WGC a menudo entrega un frame fijo.
+ */
+export async function acquireDesktopStreamFromSourceId(
+  sourceId: string,
+  opts?: AcquireDesktopOptions
+): Promise<MediaStream> {
+  const preferLegacyFirst =
+    Boolean(opts?.forceLegacy) || (sourceId.startsWith('screen:') && isWindows())
+
+  if (preferLegacyFirst) {
+    try {
+      return await acquireDesktopStreamLegacy(sourceId)
+    } catch (e) {
+      if (e instanceof Error && (e.name === 'NotAllowedError' || e.name === 'AbortError')) {
+        throw e
+      }
+    }
+  }
+
+  if (typeof window.studio?.setPendingDisplaySource === 'function') {
+    await window.studio.setPendingDisplaySource(sourceId)
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        audio: false,
+        video: {
+          width: { ideal: 1920, max: 1920 },
+          height: { ideal: 1080, max: 1080 },
+          frameRate: { min: 15, ideal: 30, max: 30 }
+        }
+      })
+      const vt = stream.getVideoTracks()[0]
+      if (!vt) {
+        stream.getTracks().forEach((t) => t.stop())
+        throw new Error('Sin pista de vídeo en la captura.')
+      }
+      configureDisplayCaptureVideoTrack(vt)
+      return stream
+    } catch (e) {
+      if (e instanceof Error && (e.name === 'NotAllowedError' || e.name === 'AbortError')) {
+        throw e
+      }
+    }
+  }
+  return acquireDesktopStreamLegacy(sourceId)
 }

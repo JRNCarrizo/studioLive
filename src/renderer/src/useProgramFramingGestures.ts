@@ -33,7 +33,8 @@ export type ProgramFramingGesturesOpts = {
   getVideo: (cameraId: string) => HTMLVideoElement | undefined
   getCrop: (cameraId: string) => CamCrop
   getFraming: (cameraId: string) => CamFraming
-  applyFraming: (cameraId: string, next: CamFraming) => void
+  /** Solo actualiza el target; el canvas interpola (zoom/pan más fluidos). */
+  applyFramingGesture: (cameraId: string, next: CamFraming) => void
   rotateDeg: number
   stream?: MediaStream
   neutralFraming?: CamFraming
@@ -47,7 +48,7 @@ export function useProgramFramingGestures({
   getVideo,
   getCrop,
   getFraming,
-  applyFraming,
+  applyFramingGesture,
   rotateDeg,
   stream,
   neutralFraming = FRAMING_NEUTRAL,
@@ -77,9 +78,9 @@ export function useProgramFramingGestures({
       ) {
         return
       }
-      applyFraming(cameraId, next)
+      applyFramingGesture(cameraId, next)
     },
-    [applyFraming, cameraId, getFraming]
+    [applyFramingGesture, cameraId, getFraming]
   )
 
   const handleProgramWheelEvent = useCallback(

@@ -3,14 +3,11 @@ import { useState } from 'react'
 import {
   PROGRAM_BACKGROUND_COLOR_PRESETS,
   type ProgramBackground,
-  type ProgramBackgroundImageFit,
-  type ProgramBackgroundMode
+  type ProgramBackgroundImageFit
 } from './programBackground'
 
 type Props = {
   background: ProgramBackground
-  cameraIds: string[]
-  resolveAlias: (id: string) => string
   onBackgroundChange: (next: ProgramBackground) => void
 }
 
@@ -21,21 +18,8 @@ async function pickBackgroundImageFile(): Promise<string | null> {
   return dataUrl
 }
 
-export function FusionProgramBackgroundTools({
-  background,
-  cameraIds,
-  resolveAlias,
-  onBackgroundChange
-}: Props) {
+export function FusionProgramBackgroundTools({ background, onBackgroundChange }: Props) {
   const [pickingImage, setPickingImage] = useState(false)
-
-  const setMode = (mode: ProgramBackgroundMode) => {
-    const next: ProgramBackground = { ...background, mode }
-    if (mode === 'camera' && !next.cameraId && cameraIds[0]) {
-      next.cameraId = cameraIds[0]!
-    }
-    onBackgroundChange(next)
-  }
 
   const onPickImage = async () => {
     setPickingImage(true)
@@ -61,25 +45,16 @@ export function FusionProgramBackgroundTools({
           <button
             type="button"
             className={background.mode === 'color' ? 'fusion-program-tool-btn--active' : ''}
-            onClick={() => setMode('color')}
+            onClick={() => onBackgroundChange({ ...background, mode: 'color' })}
           >
             Color
           </button>
           <button
             type="button"
             className={background.mode === 'image' ? 'fusion-program-tool-btn--active' : ''}
-            onClick={() => setMode('image')}
+            onClick={() => onBackgroundChange({ ...background, mode: 'image' })}
           >
             Img
-          </button>
-          <button
-            type="button"
-            className={background.mode === 'camera' ? 'fusion-program-tool-btn--active' : ''}
-            onClick={() => setMode('camera')}
-            disabled={cameraIds.length === 0}
-            title={cameraIds.length === 0 ? 'Sin cámaras conectadas' : undefined}
-          >
-            Cam
           </button>
         </div>
 
@@ -136,28 +111,6 @@ export function FusionProgramBackgroundTools({
                 </button>
               ))}
             </div>
-          </div>
-        ) : null}
-
-        {background.mode === 'camera' ? (
-          <div className="fusion-program-bg-panel">
-            <select
-              className="fusion-program-bg-select"
-              value={background.cameraId ?? ''}
-              onChange={(e) =>
-                onBackgroundChange({
-                  ...background,
-                  cameraId: e.target.value || null
-                })
-              }
-            >
-              <option value="">Elegí cámara…</option>
-              {cameraIds.map((id) => (
-                <option key={id} value={id}>
-                  {resolveAlias(id)}
-                </option>
-              ))}
-            </select>
           </div>
         ) : null}
       </div>

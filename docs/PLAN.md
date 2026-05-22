@@ -1,6 +1,6 @@
 # Studio Live — plan del producto (multicámara local)
 
-**Para retomar el trabajo:** pedir al asistente que lea **`docs/PLAN.md`** (visión y stack) y **`docs/HISTORIAL_IMPLEMENTACION.md`** (qué está hecho en código: fusión, MP4, GitHub, etc.).
+**Para retomar el trabajo:** leer **`docs/ESTUDIO_LIVE_GUIA.md`** (estado y herramientas para el usuario), **`docs/PLAN.md`** (visión y stack) y **`docs/HISTORIAL_IMPLEMENTACION.md`** (detalle de código).
 
 ## Visión
 
@@ -64,4 +64,4 @@ En la carpeta del proyecto: `npm install` y `npm run dev`. En la ventana aparece
 
 ---
 
-*Última actualización: ver también `docs/HISTORIAL_IMPLEMENTACION.md` para el estado detallado del código.*
+*Última actualización: ver `docs/ESTUDIO_LIVE_GUIA.md` (guía operativa) y `docs/HISTORIAL_IMPLEMENTACION.md` (código).*

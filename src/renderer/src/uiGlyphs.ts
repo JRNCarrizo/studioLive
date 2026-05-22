@@ -11,5 +11,7 @@ export const GLYPH = {
   close: '\u00D7',
   /** Ecualizador (barras / mezclador). */
   eq: '\u2630',
-  music: '\u266A'
+  music: '\u266A',
+  /** Consola / movimiento de cámara (gamepad). */
+  motion: '\uD83C\uDFAE'
 } as const

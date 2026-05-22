@@ -23,13 +23,13 @@ export const CROP_FULL: CamCrop = { left: 0, top: 0, right: 1, bottom: 1 }
 export const CROP_MIN_SPAN = 0.08
 
 /** Rueda / trackpad: menor k = zoom más lento (exp(-deltaY * k)). */
-export const PROGRAM_WHEEL_ZOOM_K = 0.00075
+export const PROGRAM_WHEEL_ZOOM_K = 0.00042
 
-/** Tope por evento wheel (~5,5 % por tick) para evitar saltos en trackpads sensibles. */
-export const PROGRAM_WHEEL_ZOOM_MAX_STEP = 1.055
+/** Tope por evento wheel (~2,8 % por tick) para evitar saltos en trackpads sensibles. */
+export const PROGRAM_WHEEL_ZOOM_MAX_STEP = 1.028
 
 /** Pellizco dos dedos: fracción del cambio de escala aplicada por frame. */
-export const PROGRAM_PINCH_ZOOM_DAMP = 0.38
+export const PROGRAM_PINCH_ZOOM_DAMP = 0.32
 
 export function wheelDeltaToZoomFactor(deltaY: number, deltaMode = 0): number {
   let dy = deltaY
@@ -778,9 +778,10 @@ export function panFramingByCssDeltaWithCrop(params: {
   const cssDxRatio = dx / (rect.width * (dw / cw))
   const cssDyRatio = dy / (rect.height * (dh / ch))
   const z = Math.max(1, Math.min(4, cur.zoom))
+  /** Agarrar y arrastrar: la imagen sigue el cursor (invertir delta de encuadre). */
   return clampFraming({
     ...cur,
-    offsetX: cur.offsetX + cssDxRatio / z,
-    offsetY: cur.offsetY + cssDyRatio / z
+    offsetX: cur.offsetX - cssDxRatio / z,
+    offsetY: cur.offsetY - cssDyRatio / z
   })
 }

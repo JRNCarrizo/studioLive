@@ -15,7 +15,18 @@ for (const p of files) {
         "import { fmtPlanTime } from './fusionCameraPlan'\nimport { GLYPH } from './uiGlyphs'"
       )
     }
-    s = s.replace(/\{floating \? '.{1,12}' : '.{1,12}'\}/, '{floating ? GLYPH.floatOn : GLYPH.floatOff}')
+    // Solo el icono del botón flotante — nunca onMouseDown (arrastre usa startDrag).
+    s = s
+      .split('\n')
+      .map((line) =>
+        line.includes('onMouseDown')
+          ? line
+          : line.replace(
+              /\{floating \? ['"][^'"]{1,12}['"] : ['"][^'"]{1,12}['"]\}/g,
+              '{floating ? GLYPH.floatOn : GLYPH.floatOff}'
+            )
+      )
+      .join('\n')
     s = s.replace(
       /\{playing \? '.{1,16}' : '.{1,16}'\}/,
       '{playing ? GLYPH.pause : GLYPH.play}'

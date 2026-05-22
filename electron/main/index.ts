@@ -24,6 +24,19 @@ import {
 import { convertWebmFileToMp4, getFFmpegPath } from './ffmpegConvert'
 import { ensureStudioCerts } from './tls'
 
+/**
+ * YouTube / Chrome en captura de pantalla: si el vídeo queda congelado, reiniciá la app con
+ * STUDIO_DISABLE_HW_ACCEL=1 (npm run dev:no-gpu).
+ */
+if (process.env.STUDIO_DISABLE_HW_ACCEL === '1') {
+  app.disableHardwareAcceleration()
+  app.commandLine.appendSwitch('disable-gpu')
+  app.commandLine.appendSwitch('disable-gpu-compositing')
+}
+
+/** Fuente elegida en el picker; la consume setDisplayMediaRequestHandler al llamar getDisplayMedia. */
+let pendingDisplaySourceId: string | null = null
+
 /** Debe registrarse antes de app.ready — permite `<video src>` desde dev server sin file:// bloqueado. */
 protocol.registerSchemesAsPrivileged([
   {
@@ -71,6 +84,7 @@ function createWindow(): void {
   const viteDev = Boolean(process.env.ELECTRON_RENDERER_URL)
   const devToolsOptOut =
     process.env.STUDIO_DEVTOOLS === '0' || process.env.STUDIO_DEVTOOLS === 'false'
+  /** DevTools solo en `npm run dev` o con STUDIO_DEVTOOLS=1; en el .exe empaquetado no se abre solo. */
   const openDevTools =
     !devToolsOptOut &&
     (viteDev || process.env.STUDIO_DEVTOOLS === '1' || process.env.STUDIO_DEVTOOLS === 'true')
@@ -117,7 +131,9 @@ ipcMain.handle('studio:get-info', () => ({
   port: signalingPort,
   loopbackSignalingPort,
   hostPanelHttpPort,
-  ips: getLanIPv4s()
+  ips: getLanIPv4s(),
+  platform: process.platform,
+  hwAccelDisabled: process.env.STUDIO_DISABLE_HW_ACCEL === '1'
 }))
 
 ipcMain.handle('studio:is-sig-ready', () => signalingRuntime != null)
@@ -326,6 +342,26 @@ ipcMain.handle('studio:minimize-main-window', () => {
   return true
 })
 
+/** Windows 10+ / macOS: la ventana se ve en el monitor pero no entra en captura de pantalla (WDA_EXCLUDEFROMCAPTURE). */
+ipcMain.handle('studio:set-exclude-from-capture', (_e, enabled: boolean) => {
+  const w = mainWindow
+  if (!w || w.isDestroyed()) return { ok: false as const, supported: false as const }
+  if (process.platform !== 'win32' && process.platform !== 'darwin') {
+    return { ok: false as const, supported: false as const }
+  }
+  w.setContentProtection(Boolean(enabled))
+  return { ok: true as const, supported: true as const }
+})
+
+ipcMain.handle('studio:is-exclude-from-capture-supported', () => {
+  return process.platform === 'win32' || process.platform === 'darwin'
+})
+
+ipcMain.handle('studio:set-pending-display-source', (_evt, sourceId: string) => {
+  pendingDisplaySourceId = typeof sourceId === 'string' && sourceId.length ? sourceId : null
+  return true
+})
+
 ipcMain.handle('studio:list-display-sources', async () => {
   const sources = await desktopCapturer.getSources({
     types: ['screen', 'window'],
@@ -382,6 +418,25 @@ app.whenReady().then(async () => {
 
   session.defaultSession.setPermissionRequestHandler((_wc, permission, callback) => {
     callback(permission === 'media' || permission === 'display-capture')
+  })
+
+  session.defaultSession.setDisplayMediaRequestHandler((_request, callback) => {
+    const id = pendingDisplaySourceId
+    pendingDisplaySourceId = null
+    if (!id) {
+      callback({})
+      return
+    }
+    void desktopCapturer
+      .getSources({
+        types: ['screen', 'window'],
+        thumbnailSize: { width: 1, height: 1 }
+      })
+      .then((sources) => {
+        const source = sources.find((s) => s.id === id)
+        callback(source ? { video: source, audio: false } : {})
+      })
+      .catch(() => callback({}))
   })
 
   session.defaultSession.setCertificateVerifyProc((request, callback) => {
