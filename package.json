@@ -60,7 +60,8 @@
       }
     ],
     "asarUnpack": [
-      "**/node_modules/ffmpeg-static/**"
+      "**/node_modules/ffmpeg-static/**",
+      "**/node_modules/electron-updater/**"
     ],
     "win": {
       "signAndEditExecutable": false,

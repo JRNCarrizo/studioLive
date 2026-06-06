@@ -1,5 +1,8 @@
+import { createRequire } from 'node:module'
+
 import { app, BrowserWindow, ipcMain } from 'electron'
-import { autoUpdater } from 'electron-updater'
+
+import type { AppUpdater } from 'electron-updater'
 
 export type UpdateEventPayload =
   | { phase: 'checking' }
@@ -9,10 +12,22 @@ export type UpdateEventPayload =
   | { phase: 'ready'; version: string }
   | { phase: 'error'; message: string }
 
+const requireUpdater = createRequire(import.meta.url)
+
 let mainWindow: BrowserWindow | null = null
 
 function sendUpdateEvent(payload: UpdateEventPayload): void {
   mainWindow?.webContents.send('studio:update-event', payload)
+}
+
+/** electron-updater es CJS; import ESM falla en el .exe empaquetado. */
+function loadAutoUpdater(): AppUpdater | null {
+  try {
+    return requireUpdater('electron-updater').autoUpdater as AppUpdater
+  } catch (e) {
+    console.error('[studio-update] No se pudo cargar electron-updater', e)
+    return null
+  }
 }
 
 export function bindAutoUpdateWindow(win: BrowserWindow | null): void {
@@ -26,6 +41,16 @@ export function setupAutoUpdater(): void {
     ipcMain.handle('studio:check-for-updates', async () => ({
       ok: false as const,
       reason: 'dev' as const
+    }))
+    ipcMain.handle('studio:install-update', () => false)
+    return
+  }
+
+  const autoUpdater = loadAutoUpdater()
+  if (!autoUpdater) {
+    ipcMain.handle('studio:check-for-updates', async () => ({
+      ok: false as const,
+      message: 'Actualizaciones no disponibles en esta instalación.'
     }))
     ipcMain.handle('studio:install-update', () => false)
     return
@@ -66,7 +91,7 @@ export function setupAutoUpdater(): void {
   })
 
   /** No bloquear el arranque (signaling + UI primero). */
-  window.setTimeout(() => {
+  setTimeout(() => {
     void autoUpdater.checkForUpdates().catch((e) => {
       const message = e instanceof Error ? e.message : String(e)
       sendUpdateEvent({ phase: 'error', message })
