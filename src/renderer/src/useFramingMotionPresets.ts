@@ -8,7 +8,12 @@ import {
   saveCustomFramingMotionFromCurrent,
   type CustomFramingMotionPreset
 } from './framingMotionPresetsStorage'
-import { BUILTIN_FRAMING_MOTION_PRESETS, type FramingMotionPreset } from './programFramingPresets'
+import {
+  BUILTIN_FRAMING_MOTION_PRESETS,
+  BUILTIN_MOTION_SEQUENCE_PRESETS,
+  BUILTIN_MOTION_SIMPLE_PRESETS,
+  type FramingMotionPreset
+} from './programFramingPresets'
 
 export function useFramingMotionPresets() {
   const [tick, setTick] = useState(0)
@@ -16,6 +21,8 @@ export function useFramingMotionPresets() {
 
   const customPresets = useMemo(() => listCustomFramingMotionPresets(), [tick])
   const builtinPresets = BUILTIN_FRAMING_MOTION_PRESETS
+  const builtinSimplePresets = BUILTIN_MOTION_SIMPLE_PRESETS
+  const builtinSequencePresets = BUILTIN_MOTION_SEQUENCE_PRESETS
 
   const saveFromCurrent = useCallback(
     (name: string, current: CamFraming, framingNeutral: CamFraming) => {
@@ -52,6 +59,8 @@ export function useFramingMotionPresets() {
 
   return {
     builtinPresets,
+    builtinSimplePresets,
+    builtinSequencePresets,
     customPresets,
     saveFromCurrent,
     rename,

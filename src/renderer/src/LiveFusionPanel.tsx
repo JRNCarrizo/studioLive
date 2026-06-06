@@ -1,11 +1,16 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { useCameraAliases } from './cameraAliases'
 import { configureDisplayCaptureVideoTrack, isDisplayCaptureId } from './displayCapture'
 import { ProgramCropOverlay } from './ProgramCropOverlay'
 import { FusionProgramBackgroundTools } from './FusionProgramBackgroundTools'
+import { FloatingColorPanel, FusionColorTrigger } from './FloatingColorPanel'
 import { FloatingMotionPanel, FusionMotionTrigger } from './FloatingMotionPanel'
-import { StudioConfirmForm } from './StudioInlineDialog'
+import { FusionCameraMotionChips } from './FusionCameraMotionChips'
+import { resolveMotionPresetDisplay } from './motionPresetMeta'
+import { useCameraMotionProgram } from './useCameraMotionProgram'
+import { FusionRecordingPreviewOverlay } from './FusionRecordingPreviewOverlay'
+import { StudioConfirmModal } from './StudioInlineDialog'
 import { FusionProgramTools } from './FusionProgramTools'
 import { loadFramingMotionSettings } from './framingMotionPresetsStorage'
 import { useFramingMotion } from './useFramingMotion'
@@ -16,6 +21,8 @@ import { FusionCameraPlanBar } from './FusionCameraPlanBar'
 import { fusionCameraColorMap, fusionSegmentColor, type FusionTimelineSegment } from './fusionCameraPlan'
 import { FusionScenePresetsPanel } from './FusionScenePresetsPanel'
 import { FusionStudioTransport } from './FusionStudioTransport'
+import { useFusionProgramHotkeys } from './fusionProgramHotkeys'
+import { useRecordingTrim } from './useRecordingTrim'
 import { ProgramLayoutEditorOverlay } from './ProgramLayoutEditorOverlay'
 import { ProgramReadinessBanner, buildProgramReadiness } from './ProgramReadinessBanner'
 import { resolvePresetSlots, type ScenePreset } from './programScenePresets'
@@ -39,6 +46,12 @@ import {
   lerpFraming,
   type CamFraming
 } from './programFraming'
+import {
+  clampColorAdjust,
+  COLOR_ADJUST_NEUTRAL,
+  colorAdjustIsNeutral,
+  type CamColorAdjust
+} from './programColorAdjust'
 
 /** Centrado por defecto en Fusión en vivo (calibrado vs. miniaturas: un poco a la izquierda y abajo). */
 const LIVE_FRAMING_NEUTRAL: CamFraming = { zoom: 1, offsetX: 0.47, offsetY: 0.52 }
@@ -121,7 +134,11 @@ type LiveFusionPanelProps = {
   /** Indica si ya hay un audio de PC activo (para etiquetar el botón). */
   hasPcAudio: boolean
   /** Agrega captura de pantalla o ventana (misma fuente que Sesión en vivo). */
+  /** Abre el mic si hace falta al grabar programa en vivo. */
+  ensurePcAudioForRecording: () => Promise<MediaStream | null>
   onAddDisplayCapture: () => void | Promise<void>
+  /** Solo atajos cuando esta pestaña está visible. */
+  workspaceActive?: boolean
 }
 
 function pickLiveProgramRecorderMime(): string | undefined {
@@ -367,13 +384,18 @@ export function LiveFusionPanel({
   onOpenQr,
   onOpenAudio,
   hasPcAudio,
-  onAddDisplayCapture
+  ensurePcAudioForRecording,
+  onAddDisplayCapture,
+  workspaceActive = true
 }: LiveFusionPanelProps) {
   const cameraAliases = useCameraAliases()
   const { background: programBackground, backgroundRef: programBackgroundRef, setBackground: setProgramBackground } =
     useProgramBackground()
   const [mixMode, setMixMode] = useState<LiveMixMode>('manual')
   const [motionOpen, setMotionOpen] = useState(false)
+  const [motionProgramMode, setMotionProgramMode] = useState(false)
+  const [motionAssignTargetId, setMotionAssignTargetId] = useState<string | null>(null)
+  const [colorOpen, setColorOpen] = useState(false)
   const [cancelFlowConfirm, setCancelFlowConfirm] = useState<'recording' | 'preview' | null>(null)
   const [programRecording, setProgramRecording] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
@@ -387,6 +409,11 @@ export function LiveFusionPanel({
   const [programBlob, setProgramBlob] = useState<Blob | null>(null)
   const [exportFileName, setExportFileName] = useState('')
   const [programPreviewUrl, setProgramPreviewUrl] = useState<string | null>(null)
+  const programPreviewVideoRef = useRef<HTMLVideoElement | null>(null)
+  const previewTrim = useRecordingTrim(programPreviewUrl != null)
+  const [programPreviewRecordedSec, setProgramPreviewRecordedSec] = useState<number | undefined>(
+    undefined
+  )
   const [programElapsedLabel, setProgramElapsedLabel] = useState('00:00')
   const [programSegmentsDone, setProgramSegmentsDone] = useState<FusionTimelineSegment[]>([])
   const [openProgramSeg, setOpenProgramSeg] = useState<{ cameraId: string; startSec: number } | null>(
@@ -449,6 +476,8 @@ export function LiveFusionPanel({
   /** Recorte por fuente: qué parte del frame entra al programa / grabación. */
   const cropTargetRef = useRef<Map<string, CamCrop>>(new Map())
   const [cropTick, setCropTick] = useState(0)
+  const colorAdjustRef = useRef<Map<string, CamColorAdjust>>(new Map())
+  const [colorTick, setColorTick] = useState(0)
   /** Encuadre por fuente (zoom + pan dentro del recorte); se interpola en el loop del canvas. */
   const framingTargetRef = useRef<Map<string, CamFraming>>(new Map())
   const framingCurrentRef = useRef<Map<string, CamFraming>>(new Map())
@@ -458,8 +487,11 @@ export function LiveFusionPanel({
     motionLabel: framingMotionLabel,
     cancelMotion: cancelFramingMotion,
     playPresetById: playFramingPresetById,
+    startEnterProgram: startFramingEnterProgram,
     tickMotion: tickFramingMotion
   } = framingMotion
+  const cameraMotionProgram = useCameraMotionProgram()
+  const prevProgramCameraForMotionRef = useRef<string | null>(null)
   const setFramingTargetOnly = useCallback((cameraId: string, next: CamFraming) => {
     const clamped = clampFraming(next)
     framingTargetRef.current.set(cameraId, clamped)
@@ -779,6 +811,7 @@ export function LiveFusionPanel({
         target.clip()
         /** No pintar negro: el lienzo ya trae fondo (`drawProgramBackground`); así se ven bandas/meta en ´contain´ */
         const rot = manualRotateDeg[cameraId] ?? 0
+        const colorAdjust = colorAdjustRef.current.get(cameraId) ?? COLOR_ADJUST_NEUTRAL
         const { vw, vh } = getVideoFrameSize(v, stream)
         if (!vw || !vh) return
         const layoutId = programLayoutIdRef.current
@@ -828,7 +861,8 @@ export function LiveFusionPanel({
             slotAlign,
             coverScaleRect,
             vw,
-            vh
+            vh,
+            colorAdjust
           )
         } else {
           const crop = cropTargetRef.current.get(cameraId) ?? CROP_FULL
@@ -848,7 +882,8 @@ export function LiveFusionPanel({
             slotAlign,
             coverScaleRect,
             vw,
-            vh
+            vh,
+            colorAdjust
           )
         }
       } catch {
@@ -1046,6 +1081,31 @@ export function LiveFusionPanel({
     [applyProgramScene]
   )
 
+  const runCameraEnterProgram = useCallback(
+    (cameraId: string) => {
+      if (programLayoutId !== 'single' || cropEditOpen || mixMode === 'auto') return
+      const presetIds = cameraMotionProgram.getPresetIds(cameraId)
+      if (!presetIds.length) return
+      const { speed, intensity } = loadFramingMotionSettings()
+      startFramingEnterProgram(
+        cameraId,
+        presetIds,
+        () => framingTargetRef.current.get(cameraId) ?? LIVE_FRAMING_NEUTRAL,
+        setFramingTargetOnly,
+        { speed, intensity, framingNeutral: LIVE_FRAMING_NEUTRAL },
+        LIVE_FRAMING_NEUTRAL
+      )
+    },
+    [
+      programLayoutId,
+      cropEditOpen,
+      mixMode,
+      cameraMotionProgram,
+      startFramingEnterProgram,
+      setFramingTargetOnly
+    ]
+  )
+
   const assignCameraToProgram = useCallback(
     (cameraId: string) => {
       if (programLayoutId !== 'single' && mixMode === 'manual') {
@@ -1169,7 +1229,10 @@ export function LiveFusionPanel({
   }, [programCameraId, cancelFramingMotion])
 
   useEffect(() => {
-    if (!framingEditable || !programCameraId) setMotionOpen(false)
+    if (!framingEditable || !programCameraId) {
+      setMotionOpen(false)
+      setColorOpen(false)
+    }
   }, [framingEditable, programCameraId])
 
   const playFramingMotion = useCallback(
@@ -1186,6 +1249,58 @@ export function LiveFusionPanel({
     },
     [playFramingPresetById, programCameraId, setFramingTargetOnly]
   )
+
+  const playFramingMotionOnCamera = useCallback(
+    (cameraId: string, presetId: string) => {
+      const { speed, intensity } = loadFramingMotionSettings()
+      playFramingPresetById(
+        cameraId,
+        presetId,
+        () => framingTargetRef.current.get(cameraId) ?? LIVE_FRAMING_NEUTRAL,
+        setFramingTargetOnly,
+        { speed, intensity, framingNeutral: LIVE_FRAMING_NEUTRAL }
+      )
+    },
+    [playFramingPresetById, setFramingTargetOnly]
+  )
+
+  const assignMotionToTarget = useCallback(
+    (presetId: string) => {
+      const target = motionAssignTargetId ?? programCameraId
+      if (!target) {
+        onStatus('Elegí una cámara al programa para asignar movimientos.')
+        return
+      }
+      if (cameraMotionProgram.addPreset(target, presetId)) {
+        const meta = resolveMotionPresetDisplay(presetId)
+        onStatus(
+          meta
+            ? `«${meta.label}» añadido a ${cameraAliases.resolve(target)} (al entrar).`
+            : 'Movimiento añadido.'
+        )
+      } else {
+        onStatus('No se pudo añadir (límite de 4 o ya estaba asignado).')
+      }
+    },
+    [cameraMotionProgram, motionAssignTargetId, programCameraId, cameraAliases, onStatus]
+  )
+
+  useEffect(() => {
+    if (programCameraId) setMotionAssignTargetId(programCameraId)
+  }, [programCameraId])
+
+  const motionAssignLabel = motionAssignTargetId
+    ? cameraAliases.resolve(motionAssignTargetId)
+    : 'cámara al aire'
+
+  useEffect(() => {
+    if (programLayoutId !== 'single' || cropEditOpen || mixMode === 'auto') return
+    const id = programCameraId
+    if (!id || id === prevProgramCameraForMotionRef.current) return
+    prevProgramCameraForMotionRef.current = id
+    runCameraEnterProgram(id)
+  }, [programCameraId, programLayoutId, cropEditOpen, mixMode, runCameraEnterProgram])
+
   const layoutEditable = programLayoutId !== 'single' && mixMode === 'manual'
 
   const activeLayoutGeometry = useMemo((): NormalizedSlotRect[] => {
@@ -1222,6 +1337,26 @@ export function LiveFusionPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [programCameraId, cropTick])
 
+  const programColorAdjust = useMemo<CamColorAdjust>(() => {
+    if (!programCameraId) return COLOR_ADJUST_NEUTRAL
+    return colorAdjustRef.current.get(programCameraId) ?? COLOR_ADJUST_NEUTRAL
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [programCameraId, colorTick])
+
+  const programColorActive = !colorAdjustIsNeutral(programColorAdjust)
+
+  const setProgramColorAdjust = useCallback((next: CamColorAdjust) => {
+    if (!programCameraId) return
+    colorAdjustRef.current.set(programCameraId, clampColorAdjust(next))
+    setColorTick((n) => n + 1)
+  }, [programCameraId])
+
+  const resetProgramColorAdjust = useCallback(() => {
+    if (!programCameraId) return
+    colorAdjustRef.current.delete(programCameraId)
+    setColorTick((n) => n + 1)
+  }, [programCameraId])
+
   const programFramingTarget = useMemo<CamFraming>(() => {
     if (!programCameraId) return LIVE_FRAMING_NEUTRAL
     return framingTargetRef.current.get(programCameraId) ?? LIVE_FRAMING_NEUTRAL
@@ -1244,6 +1379,7 @@ export function LiveFusionPanel({
       cancelFramingMotion()
       const clamped = clampFraming(next)
       framingTargetRef.current.set(cameraId, clamped)
+      framingCurrentRef.current.set(cameraId, clamped)
       setFramingTick((n) => n + 1)
     },
     [cancelFramingMotion]
@@ -1344,6 +1480,11 @@ export function LiveFusionPanel({
   )
 
   const onProgramMouseUp = useCallback(() => {
+    const drag = programDragRef.current
+    if (!drag?.moved) programDragRef.current = null
+  }, [])
+
+  const onProgramMouseLeave = useCallback(() => {
     programDragRef.current = null
   }, [])
 
@@ -1402,7 +1543,7 @@ export function LiveFusionPanel({
     [applyProgramScene, ensureLayoutGeometry, onStatus, setProgramBackground]
   )
 
-  const startProgramRecording = useCallback(() => {
+  const startProgramRecording = useCallback(async () => {
     if (isoBusy) {
       onStatus('No podés grabar el programa mientras hay una grabación por pistas pendiente o en curso.')
       return
@@ -1422,7 +1563,8 @@ export function LiveFusionPanel({
     const vStream = canvasRef.current.captureStream(LIVE_CAPTURE_FPS)
     const vidTrack = vStream.getVideoTracks()[0]
     const tracks: MediaStreamTrack[] = [vidTrack]
-    const aTrack = audioStream?.getAudioTracks()[0]
+    const pcStream = (await ensurePcAudioForRecording()) ?? audioStream
+    const aTrack = pcStream?.getAudioTracks()[0]
     if (aTrack) tracks.push(aTrack)
     const outStream = new MediaStream(tracks)
     const parts: BlobPart[] = []
@@ -1445,7 +1587,7 @@ export function LiveFusionPanel({
         ? 'Grabando programa en modo automático (director por reglas).'
         : 'Grabando salida del programa (canvas). Cambiá de toma con las miniaturas.'
     )
-  }, [audioStream, isoBusy, mixMode, onStatus, outputDir, recordingReadiness])
+  }, [audioStream, ensurePcAudioForRecording, isoBusy, mixMode, onStatus, outputDir, recordingReadiness])
 
   const stopProgramRecording = useCallback(async () => {
     const rec = recRef.current
@@ -1460,6 +1602,7 @@ export function LiveFusionPanel({
       }
     })
     const tEnd = getProgramRecordTimeSec()
+    setProgramPreviewRecordedSec(tEnd)
     setOpenProgramSeg((open) => {
       if (open) {
         setProgramSegmentsDone((prev) => [
@@ -1495,10 +1638,13 @@ export function LiveFusionPanel({
     onStatus(`Guardando WebM: ${name} …`)
     try {
       const buf = await programBlob.arrayBuffer()
-      await window.studio.saveVideo(filePath, buf)
+      const trim = previewTrim.getTrimForExport()
+      await window.studio.saveVideo(filePath, buf, trim)
       setProgramBlob(null)
       setLastSavedPath(filePath)
-      onStatus(`Programa guardado (WebM): ${name}`)
+      onStatus(
+        trim ? `Programa guardado (WebM recortado): ${name}` : `Programa guardado (WebM): ${name}`
+      )
     } catch (e) {
       onStatus(`Error al guardar: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
@@ -1506,7 +1652,7 @@ export function LiveFusionPanel({
       setExportTarget(null)
       setExportStartMs(null)
     }
-  }, [exportFileName, onStatus, outputDir, programBlob])
+  }, [exportFileName, onStatus, outputDir, programBlob, previewTrim])
 
   const saveProgramBlobAsMp4 = useCallback(async () => {
     if (!programBlob || !outputDir) {
@@ -1538,10 +1684,11 @@ export function LiveFusionPanel({
       setExportTarget(null)
       setExportStartMs(null)
     }
-  }, [exportFileName, onStatus, outputDir, programBlob])
+  }, [exportFileName, onStatus, outputDir, programBlob, previewTrim])
 
   const discardProgramBlob = useCallback(() => {
     setProgramBlob(null)
+    setProgramPreviewRecordedSec(undefined)
     setLastSavedPath(null)
     onStatus('Vista previa del programa descartada.')
   }, [onStatus])
@@ -1592,10 +1739,27 @@ export function LiveFusionPanel({
 
   const disabledProgramRec = isoBusy || !cameraIds.length
 
+  const hotkeyActiveCameraId =
+    programLayoutId === 'single' ? programCameraId : (programSlots[selectedLayoutSlot] ?? programSlots[0] ?? null)
+
+  useFusionProgramHotkeys({
+    workspaceActive,
+    enabled: cameraIds.length > 0,
+    blocked: cancelFlowConfirm !== null || configPopoverOpen || programPreviewUrl !== null,
+    cameraIds,
+    activeCameraId: hotkeyActiveCameraId,
+    onAssignCamera: assignCameraToProgram,
+    manualDirectorOnly: mixMode === 'auto',
+    onRecordStart: startProgramRecording,
+    onRecordStop: () => void stopProgramRecording(),
+    recording: programRecording,
+    canRecord: !disabledProgramRec && !programRecording && recordingReadiness.ready
+  })
+
   return (
     <div style={workspaceInnerCard}>
       {cancelFlowConfirm === 'recording' ? (
-        <StudioConfirmForm
+        <StudioConfirmModal
           message={
             <>
               ¿Cancelar la grabación del programa?
@@ -1612,7 +1776,7 @@ export function LiveFusionPanel({
       ) : null}
 
       {cancelFlowConfirm === 'preview' ? (
-        <StudioConfirmForm
+        <StudioConfirmModal
           message={
             <>
               ¿Descartar la vista previa del programa?
@@ -1625,6 +1789,31 @@ export function LiveFusionPanel({
           danger
           onConfirm={doCancelProgramFlow}
           onCancel={() => setCancelFlowConfirm(null)}
+        />
+      ) : null}
+
+      {programPreviewUrl ? (
+        <FusionRecordingPreviewOverlay
+          mode="live"
+          videoUrl={programPreviewUrl}
+          fileName={exportFileName}
+          onFileNameChange={setExportFileName}
+          outputDir={outputDir}
+          exportBusy={exportBusy}
+          exportTarget={exportTarget}
+          exportElapsed={exportElapsed}
+          onSaveWebm={() => void saveProgramBlob()}
+          onSaveMp4={() => void saveProgramBlobAsMp4()}
+          onDiscard={() => setCancelFlowConfirm('preview')}
+          videoRef={programPreviewVideoRef}
+          durationSec={previewTrim.durationSec}
+          trimInSec={previewTrim.trimInSec}
+          trimOutSec={previewTrim.trimOutSec}
+          exportDurationSec={previewTrim.exportDurationSec}
+          onTrimInChange={previewTrim.setTrimInSec}
+          onTrimOutChange={previewTrim.setTrimOutSec}
+          onVideoDuration={previewTrim.onVideoDuration}
+          fallbackRecordedSec={programPreviewRecordedSec}
         />
       ) : null}
 
@@ -2011,7 +2200,7 @@ export function LiveFusionPanel({
                     onMouseDown={onProgramMouseDown}
                     onMouseMove={onProgramMouseMove}
                     onMouseUp={onProgramMouseUp}
-                    onMouseLeave={onProgramMouseUp}
+                    onMouseLeave={onProgramMouseLeave}
                     onClick={onProgramClick}
                     onDoubleClick={onProgramDoubleClick}
                     style={{
@@ -2106,15 +2295,33 @@ export function LiveFusionPanel({
                 </div>
               </div>
                 </div>
-                <FusionCameraPlanBar
-                  visible={cameraIds.length > 0}
-                  segments={programTimelineSegments}
-                  scaleDuration={programTimelineScale}
-                  currentTime={programPlanTimeSec}
-                  segmentColor={(id) => fusionSegmentColor(programCameraColors, id)}
-                  resolveAlias={cameraAliases.resolve}
-                  legendCameraIds={cameraIds}
-                />
+                <div className="fusion-program-dock">
+                  <FusionStudioTransport
+                    mode="live"
+                    visible={cameraIds.length > 0}
+                    fusionRecording={programRecording}
+                    elapsedLabel={programElapsedLabel}
+                    canRecord={!disabledProgramRec && !programRecording && recordingReadiness.ready}
+                    canCancel={(programRecording || programBlob !== null) && !exportBusy}
+                    onRecordStart={() => void startProgramRecording()}
+                    onRecordStop={() => void stopProgramRecording()}
+                    onCancel={cancelProgramFlow}
+                  />
+                  <FusionCameraPlanBar
+                    visible={cameraIds.length > 0}
+                    segments={programTimelineSegments}
+                    scaleDuration={programTimelineScale}
+                    currentTime={programPlanTimeSec}
+                    segmentColor={(id) => fusionSegmentColor(programCameraColors, id)}
+                    resolveAlias={cameraAliases.resolve}
+                    legendCameraIds={cameraIds}
+                  />
+                </div>
+                <p className="fusion-hotkeys-hint">
+                  Atajos: <kbd>1</kbd>–<kbd>9</kbd> cámara · <kbd>←</kbd>
+                  <kbd>→</kbd> anterior/siguiente · <kbd>R</kbd> grabar
+                  {mixMode === 'auto' ? ' (manual para elegir cámara con teclado)' : ''}
+                </p>
                 </div>
                 {cameraIds.length > 0 ? (
                   <aside className="fusion-program-rail fusion-program-rail--right">
@@ -2124,6 +2331,11 @@ export function LiveFusionPanel({
                     />
                     {framingEditable && programCameraId ? (
                       <>
+                        <FusionColorTrigger
+                          active={colorOpen}
+                          processing={programColorActive}
+                          onClick={() => setColorOpen((v) => !v)}
+                        />
                         <FusionProgramTools
                           cropEditOpen={cropEditOpen}
                           programCrop={programCrop}
@@ -2198,10 +2410,19 @@ export function LiveFusionPanel({
                           ↻
                         </button>
                       ) : null}
+                      <FusionCameraMotionChips
+                        cameraId={id}
+                        presetIds={cameraMotionProgram.getPresetIds(id)}
+                        disabled={cropEditOpen || mixMode === 'auto'}
+                        onRemoveAt={(index) => cameraMotionProgram.removePresetAt(id, index)}
+                        onAddPreset={(presetId) => cameraMotionProgram.addPreset(id, presetId)}
+                        onPreviewPreset={(presetId) => playFramingMotionOnCamera(id, presetId)}
+                      />
                       <button
                         type="button"
                         className="fusion-thumb-overlay-btn fusion-thumb-close"
                         onClick={() => {
+                          cameraMotionProgram.removeCamera(id)
                           onCloseSource(id)
                           onStatus(
                             isDisplayCaptureId(id)
@@ -2249,18 +2470,6 @@ export function LiveFusionPanel({
           </aside>
             </div>
 
-          <FusionStudioTransport
-            mode="live"
-            visible={cameraIds.length > 0}
-            fusionRecording={programRecording}
-            elapsedLabel={programElapsedLabel}
-            canRecord={!disabledProgramRec && !programRecording && recordingReadiness.ready}
-            canCancel={(programRecording || programBlob !== null) && !exportBusy}
-            onRecordStart={() => void startProgramRecording()}
-            onRecordStop={() => void stopProgramRecording()}
-            onCancel={cancelProgramFlow}
-          />
-
             <div className="fusion-video-decoders" aria-hidden>
               {cameraIds.map((id) => (
                 <DecoderVideo
@@ -2274,166 +2483,6 @@ export function LiveFusionPanel({
               ))}
             </div>
 
-            {programBlob ? (
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: 12,
-                  borderRadius: 10,
-                  border: '1px solid #334155',
-                  background: '#0c121c'
-                }}
-              >
-                <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0', marginBottom: 6 }}>
-                  Vista previa
-                </div>
-                <label style={{ display: 'block', fontSize: 11, color: '#94a3b8', marginBottom: 6 }}>
-                  Nombre de archivo
-                </label>
-                <input
-                  type="text"
-                  value={exportFileName}
-                  onChange={(e) => setExportFileName(e.target.value)}
-                  spellCheck={false}
-                  disabled={exportBusy}
-                  style={{
-                    width: '100%',
-                    maxWidth: 400,
-                    marginBottom: 10,
-                    padding: '8px 10px',
-                    borderRadius: 8,
-                    border: '1px solid #475569',
-                    background: '#020617',
-                    color: '#e2e8f0',
-                    fontSize: 13
-                  }}
-                />
-                <div style={{ fontSize: 11, color: '#64748b', marginBottom: 10, lineHeight: 1.4 }}>
-                  <strong>MP4</strong> suele ir mejor en Windows; WebM guarda más rápido.
-                </div>
-                {programPreviewUrl ? (
-                  <video
-                    src={programPreviewUrl}
-                    controls
-                    style={{
-                      width: '100%',
-                      maxHeight: 240,
-                      borderRadius: 8,
-                      background: '#000'
-                    }}
-                  />
-                ) : null}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                  <button
-                    type="button"
-                    disabled={!outputDir || exportBusy}
-                    onClick={() => void saveProgramBlob()}
-                    style={{
-                      padding: '8px 14px',
-                      borderRadius: 8,
-                      border: '1px solid #047857',
-                      background: !outputDir || exportBusy ? '#334155' : '#065f46',
-                      color: '#ecfdf5',
-                      fontWeight: 600,
-                      opacity: exportBusy ? 0.85 : 1,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 8
-                    }}
-                  >
-                    {exportTarget === 'webm' ? (
-                      <>
-                        <span className="studio-spinner" aria-hidden /> Guardando WebM…
-                      </>
-                    ) : (
-                      'Guardar WebM en carpeta'
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={!outputDir || exportBusy}
-                    onClick={() => void saveProgramBlobAsMp4()}
-                    style={{
-                      padding: '8px 14px',
-                      borderRadius: 8,
-                      border: '1px solid #1d4ed8',
-                      background: !outputDir || exportBusy ? '#334155' : '#1e40af',
-                      color: '#eff6ff',
-                      fontWeight: 600,
-                      opacity: exportBusy ? 0.85 : 1,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 8
-                    }}
-                  >
-                    {exportTarget === 'mp4' ? (
-                      <>
-                        <span className="studio-spinner" aria-hidden /> Generando MP4…
-                      </>
-                    ) : (
-                      'Guardar MP4'
-                    )}
-                  </button>
-                  <button
-                    type="button"
-                    disabled={exportBusy}
-                    onClick={discardProgramBlob}
-                    style={{
-                      padding: '8px 14px',
-                      borderRadius: 8,
-                      border: '1px solid #475569',
-                      background: '#1e293b',
-                      color: '#e2e8f0',
-                      fontWeight: 600,
-                      opacity: exportBusy ? 0.6 : 1
-                    }}
-                  >
-                    Descartar
-                  </button>
-                </div>
-                {exportTarget ? (
-                  <div
-                    role="status"
-                    aria-live="polite"
-                    style={{
-                      marginTop: 10,
-                      padding: '10px 12px',
-                      borderRadius: 10,
-                      border:
-                        exportTarget === 'mp4' ? '1px solid #1d4ed8' : '1px solid #047857',
-                      background: exportTarget === 'mp4' ? '#0b1a3a' : '#062018',
-                      color: exportTarget === 'mp4' ? '#dbeafe' : '#bbf7d0',
-                      fontSize: 12,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 8
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                      <span className="studio-spinner lg" aria-hidden />
-                      <div style={{ flex: 1, minWidth: 0, lineHeight: 1.45 }}>
-                        <strong>
-                          {exportTarget === 'mp4' ? 'Generando MP4…' : 'Guardando WebM…'}
-                        </strong>{' '}
-                        {exportTarget === 'mp4'
-                          ? 'Convirtiendo a H.264 (puede tardar; no cierres la app).'
-                          : 'Guardando en la carpeta de grabación…'}
-                      </div>
-                      <span
-                        style={{
-                          fontVariantNumeric: 'tabular-nums',
-                          fontWeight: 700,
-                          fontSize: 13
-                        }}
-                      >
-                        {Math.floor(exportElapsed / 1000)}s
-                      </span>
-                    </div>
-                    <div className="studio-progress-bar" aria-hidden />
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
 
             {lastSavedPath ? (
               <div
@@ -2841,8 +2890,22 @@ export function LiveFusionPanel({
             : LIVE_FRAMING_NEUTRAL
         }
         onPlay={playFramingMotion}
+        onAssign={assignMotionToTarget}
         onStop={cancelFramingMotion}
         onStatus={onStatus}
+        programMode={motionProgramMode}
+        onProgramModeChange={setMotionProgramMode}
+        assignTargetLabel={motionAssignLabel}
+      />
+
+      <FloatingColorPanel
+        open={colorOpen && framingEditable && programCameraId != null}
+        onClose={() => setColorOpen(false)}
+        disabled={exportBusy}
+        cameraLabel={programCameraId ? cameraAliases.resolve(programCameraId) : ''}
+        adjust={programColorAdjust}
+        onChange={setProgramColorAdjust}
+        onReset={resetProgramColorAdjust}
       />
     </div>
   )

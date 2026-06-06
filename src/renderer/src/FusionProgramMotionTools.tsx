@@ -10,9 +10,12 @@ type Props = {
   framingNeutral: CamFraming
   getCurrentFraming: () => CamFraming
   onPlay: (presetId: string) => void
+  onAssign: (presetId: string) => void
   onStop: () => void
   onStatus?: (msg: string) => void
-  /** Dentro del panel flotante (sin bloque duplicado de título). */
+  programMode: boolean
+  onProgramModeChange: (v: boolean) => void
+  assignTargetLabel: string
   embedded?: boolean
 }
 
@@ -28,12 +31,17 @@ export function FusionProgramMotionTools({
   framingNeutral,
   getCurrentFraming,
   onPlay,
+  onAssign,
   onStop,
   onStatus,
+  programMode,
+  onProgramModeChange,
+  assignTargetLabel,
   embedded = false
 }: Props) {
   const { settings, setSpeed, setIntensity } = useFramingMotionSettings()
-  const { builtinPresets, customPresets, saveFromCurrent, rename, remove } = useFramingMotionPresets()
+  const { builtinSimplePresets, builtinSequencePresets, customPresets, saveFromCurrent, rename, remove } =
+    useFramingMotionPresets()
   const [dialog, setDialog] = useState<DialogState>(null)
 
   const status = (msg: string) => onStatus?.(msg)
@@ -71,6 +79,22 @@ export function FusionProgramMotionTools({
       e.preventDefault()
       closeDialog()
     }
+  }
+
+  const presetHint = (title: string) =>
+    programMode
+      ? `${title}\nClic: asignar a ${assignTargetLabel}`
+      : `${title}\nClic: probar ahora · Doble clic: asignar a ${assignTargetLabel}`
+
+  const onPresetClick = (presetId: string) => {
+    if (programMode) onAssign(presetId)
+    else onPlay(presetId)
+  }
+
+  const onPresetDoubleClick = (e: React.MouseEvent, presetId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    onAssign(presetId)
   }
 
   return (
@@ -171,6 +195,37 @@ export function FusionProgramMotionTools({
           </div>
         ) : null}
 
+        <div className="fusion-program-motion-mode" role="group" aria-label="Modo del panel">
+          <button
+            type="button"
+            className={programMode ? '' : 'fusion-program-motion-mode--active'}
+            disabled={disabled}
+            onClick={() => onProgramModeChange(false)}
+          >
+            Probar
+          </button>
+          <button
+            type="button"
+            className={programMode ? 'fusion-program-motion-mode--active' : ''}
+            disabled={disabled}
+            onClick={() => onProgramModeChange(true)}
+          >
+            Programar
+          </button>
+        </div>
+        <p className="fusion-program-motion-assign-hint">
+          {programMode ? (
+            <>
+              Los clics <strong>asignan</strong> a <strong>{assignTargetLabel}</strong>. También usá{' '}
+              <strong>+</strong> en la miniatura de cada cámara.
+            </>
+          ) : (
+            <>
+              Clic = probar · doble clic = asignar a <strong>{assignTargetLabel}</strong>
+            </>
+          )}
+        </p>
+
         <div className="fusion-program-motion-sliders">
           <label className="fusion-program-motion-slider">
             <span>Velocidad</span>
@@ -204,19 +259,47 @@ export function FusionProgramMotionTools({
           </label>
         </div>
 
-        <div className="fusion-program-motion-grid">
-          {builtinPresets.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              className="fusion-program-motion-btn"
-              disabled={disabled}
-              title={p.title}
-              onClick={() => onPlay(p.id)}
-            >
-              {p.label}
-            </button>
-          ))}
+        <div className="fusion-program-motion-section">
+          <span className="fusion-program-motion-section-label">Gestos</span>
+          <div className="fusion-program-motion-grid">
+            {builtinSimplePresets.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className="fusion-program-motion-btn"
+                disabled={disabled}
+                title={presetHint(p.title)}
+                onClick={() => onPresetClick(p.id)}
+                onDoubleClick={(e) => onPresetDoubleClick(e, p.id)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="fusion-program-motion-section">
+          <span
+            className="fusion-program-motion-section-label"
+            title="Zoom en un costado, recorrido al otro y vuelta al neutro de la cámara"
+          >
+            Secuencias
+          </span>
+          <div className="fusion-program-motion-grid fusion-program-motion-grid--sequences">
+            {builtinSequencePresets.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className="fusion-program-motion-btn fusion-program-motion-btn--sequence"
+                disabled={disabled}
+                title={presetHint(p.title)}
+                onClick={() => onPresetClick(p.id)}
+                onDoubleClick={(e) => onPresetDoubleClick(e, p.id)}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
         </div>
 
         {customPresets.length > 0 ? (
@@ -229,8 +312,9 @@ export function FusionProgramMotionTools({
                     type="button"
                     className="fusion-program-motion-btn fusion-program-motion-btn--custom"
                     disabled={disabled}
-                    title={p.title}
-                    onClick={() => onPlay(p.id)}
+                    title={presetHint(p.title)}
+                    onClick={() => onPresetClick(p.id)}
+                    onDoubleClick={(e) => onPresetDoubleClick(e, p.id)}
                   >
                     {p.label}
                   </button>

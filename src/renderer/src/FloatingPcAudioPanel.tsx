@@ -73,6 +73,7 @@ type Props = {
   selectedDeviceId: string
   onDeviceChange: (deviceId: string) => void
   onActivate: () => void
+  onDeactivate?: () => void
   audioNote: string | null
   rawStream: MediaStream | null
   analyser: AnalyserNode | null
@@ -88,6 +89,7 @@ export function FloatingPcAudioPanel({
   selectedDeviceId,
   onDeviceChange,
   onActivate,
+  onDeactivate,
   audioNote,
   rawStream,
   analyser,
@@ -338,6 +340,13 @@ export function FloatingPcAudioPanel({
           Elegí entrada y ajustá <strong style={{ color: '#cbd5e1' }}>ganancia hacia la grabación</strong>. El medidor
           es post-fader: si ves <strong style={{ color: '#fecaca' }}>CLIP</strong>, bajá ganancia o la mezcla de la
           interfaz antes de grabar.
+          {hasLiveTrack ? (
+            <>
+              {' '}
+              Con el mic activo, algunas interfaces bloquean YouTube/Spotify: usá <strong style={{ color: '#cbd5e1' }}>Soltar mic</strong>{' '}
+              hasta grabar.
+            </>
+          ) : null}
         </div>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
@@ -378,6 +387,25 @@ export function FloatingPcAudioPanel({
           >
             {hasLiveTrack ? 'Reactivar audio' : 'Activar audio'}
           </button>
+          {hasLiveTrack && onDeactivate ? (
+            <button
+              type="button"
+              disabled={disabled}
+              onClick={onDeactivate}
+              style={{
+                padding: '8px 12px',
+                borderRadius: 8,
+                border: '1px solid #7f1d1d',
+                background: '#450a0a',
+                color: '#fecaca',
+                cursor: disabled ? 'not-allowed' : 'pointer',
+                fontWeight: 600
+              }}
+              title="Libera la interfaz para YouTube, Spotify, etc."
+            >
+              Soltar mic
+            </button>
+          ) : null}
         </div>
 
         {audioNote ? <div style={{ fontSize: 11, color: '#fca5a5' }}>{audioNote}</div> : null}

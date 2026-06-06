@@ -1,9 +1,9 @@
 ﻿import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 
 import { useCameraAliases } from './cameraAliases'
-import { FloatingEqualizerPanel } from './FloatingEqualizerPanel'
+import { FloatingColorPanel, FusionColorTrigger } from './FloatingColorPanel'
+import { FloatingEqualizerPanel, FusionEqTrigger } from './FloatingEqualizerPanel'
 import {
-  btnAudio,
   workspaceActionRowLabel,
   workspaceEyebrow,
   workspaceInnerCard,
@@ -18,10 +18,14 @@ import {
 import { useFusionAudioGraph } from './useFusionAudioGraph'
 import { FusionProgramBackgroundTools } from './FusionProgramBackgroundTools'
 import { FloatingMotionPanel, FusionMotionTrigger } from './FloatingMotionPanel'
-import { StudioConfirmForm } from './StudioInlineDialog'
+import { FusionCameraMotionChips } from './FusionCameraMotionChips'
+import { FusionRecordingPreviewOverlay } from './FusionRecordingPreviewOverlay'
+import { StudioConfirmModal } from './StudioInlineDialog'
 import { FusionProgramTools } from './FusionProgramTools'
 import { loadFramingMotionSettings } from './framingMotionPresetsStorage'
 import { useFramingMotion } from './useFramingMotion'
+import { useCameraMotionProgram } from './useCameraMotionProgram'
+import { resolveMotionPresetDisplay } from './motionPresetMeta'
 import { drawProgramBackground, resetProgramCanvas } from './programBackground'
 import { useProgramBackground } from './useProgramBackground'
 import { FusionSceneSwitcher } from './FusionSceneSwitcher'
@@ -33,6 +37,8 @@ import {
   type FusionTimelineSegment
 } from './fusionCameraPlan'
 import { FusionStudioTransport } from './FusionStudioTransport'
+import { useFusionProgramHotkeys } from './fusionProgramHotkeys'
+import { useRecordingTrim } from './useRecordingTrim'
 import { GLYPH } from './uiGlyphs'
 import { ProgramCropOverlay } from './ProgramCropOverlay'
 import { ProgramLayoutEditorOverlay } from './ProgramLayoutEditorOverlay'
@@ -52,6 +58,12 @@ import {
   lerpFraming,
   type CamFraming
 } from './programFraming'
+import {
+  clampColorAdjust,
+  COLOR_ADJUST_NEUTRAL,
+  colorAdjustIsNeutral,
+  type CamColorAdjust
+} from './programColorAdjust'
 import { getVideoFrameSize } from './videoFrameSize'
 import { useProgramFramingGestures } from './useProgramFramingGestures'
 import {
@@ -169,10 +181,17 @@ function createFusionMediaRecorder(stream: MediaStream, mimeType: string | undef
 type FusionPanelProps = {
   outputDir: string | null
   liveRecording: boolean
+  /** Solo atajos cuando esta pestaña está visible. */
+  workspaceActive?: boolean
   onStatus: (msg: string) => void
 }
 
-export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelProps) {
+export function FusionPanel({
+  outputDir,
+  liveRecording,
+  workspaceActive = true,
+  onStatus
+}: FusionPanelProps) {
   const cameraAliases = useCameraAliases()
   const { background: programBackground, backgroundRef: programBackgroundRef, setBackground: setProgramBackground } =
     useProgramBackground()
@@ -230,6 +249,9 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
   /** Abre el panel flotante de EQ (aplica al audio que se graba en la fusión). */
   const [eqOpen, setEqOpen] = useState(false)
   const [motionOpen, setMotionOpen] = useState(false)
+  const [motionProgramMode, setMotionProgramMode] = useState(false)
+  const [motionAssignTargetId, setMotionAssignTargetId] = useState<string | null>(null)
+  const [colorOpen, setColorOpen] = useState(false)
   const [closeSessionConfirm, setCloseSessionConfirm] = useState(false)
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -270,6 +292,8 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
 
   const cropTargetRef = useRef<Map<string, CamCrop>>(new Map())
   const [cropTick, setCropTick] = useState(0)
+  const colorAdjustRef = useRef<Map<string, CamColorAdjust>>(new Map())
+  const [colorTick, setColorTick] = useState(0)
   const [manualRotateDeg, setManualRotateDeg] = useState<Record<string, number>>({})
   const framingTargetRef = useRef<Map<string, CamFraming>>(new Map())
   const framingCurrentRef = useRef<Map<string, CamFraming>>(new Map())
@@ -295,6 +319,10 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
   const fusionPreviewMimeRef = useRef<string | undefined>(undefined)
   const fusionPreviewUrlUnmountRef = useRef<string | null>(null)
   const [fusionPreviewUrl, setFusionPreviewUrl] = useState<string | null>(null)
+  const previewTrim = useRecordingTrim(fusionPreviewUrl != null)
+  const [fusionPreviewRecordedSec, setFusionPreviewRecordedSec] = useState<number | undefined>(
+    undefined
+  )
   const [fusionPreviewIsFullscreen, setFusionPreviewIsFullscreen] = useState(false)
   /** Si la Fullscreen API falla (p. ej. Electron), cubrir el viewport con CSS. */
   const [fusionPreviewPseudoFullscreen, setFusionPreviewPseudoFullscreen] = useState(false)
@@ -556,17 +584,6 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
       return air ? { cameraId: air, startSec: t } : null
     })
   }, [fusionPlanAirId, fusionRecording, getFusionPlanTimeSec])
-
-  const assignCameraToProgram = useCallback(
-    (cameraId: string) => {
-      if (programLayoutId !== 'single') {
-        setSlotForLayout(programLayoutId, selectedLayoutSlot, cameraId)
-        return
-      }
-      pickProgramCamera(cameraId)
-    },
-    [pickProgramCamera, programLayoutId, selectedLayoutSlot, setSlotForLayout]
-  )
 
   const fusionPlanTimeSec = useMemo(() => {
     if (fusionRecording) return getFusionPlanTimeSec()
@@ -855,8 +872,11 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
     motionLabel: framingMotionLabel,
     cancelMotion: cancelFramingMotion,
     playPresetById: playFramingPresetById,
+    startEnterProgram: startFramingEnterProgram,
     tickMotion: tickFramingMotion
   } = framingMotion
+
+  const cameraMotionProgram = useCameraMotionProgram()
 
   const setFramingTargetOnly = useCallback((cameraId: string, next: CamFraming) => {
     const clamped = clampFraming(next)
@@ -902,6 +922,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
         target.clip()
         /** No pintar negro: el lienzo ya trae fondo (`drawProgramBackground`); así se ven bandas/meta en ´contain´ */
         const rot = manualRotateDeg[cameraId] ?? 0
+        const colorAdjust = colorAdjustRef.current.get(cameraId) ?? COLOR_ADJUST_NEUTRAL
         const { vw, vh } = getVideoFrameSize(v)
         if (!vw || !vh) return
         const layoutId = programLayoutIdRef.current
@@ -950,7 +971,8 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
             slotAlign,
             coverScaleRect,
             vw,
-            vh
+            vh,
+            colorAdjust
           )
         } else {
           const crop = cropTargetRef.current.get(cameraId) ?? CROP_FULL
@@ -970,7 +992,8 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
             slotAlign,
             coverScaleRect,
             vw,
-            vh
+            vh,
+            colorAdjust
           )
         }
       } catch {
@@ -1087,6 +1110,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
       cancelFramingMotion()
       const clamped = clampFraming(next)
       framingTargetRef.current.set(cameraId, clamped)
+      framingCurrentRef.current.set(cameraId, clamped)
       setFramingTick((n) => n + 1)
     },
     [cancelFramingMotion]
@@ -1114,6 +1138,26 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [programCameraId, cropTick])
 
+  const programColorAdjust = useMemo<CamColorAdjust>(() => {
+    if (!programCameraId) return COLOR_ADJUST_NEUTRAL
+    return colorAdjustRef.current.get(programCameraId) ?? COLOR_ADJUST_NEUTRAL
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [programCameraId, colorTick])
+
+  const programColorActive = !colorAdjustIsNeutral(programColorAdjust)
+
+  const setProgramColorAdjust = useCallback((next: CamColorAdjust) => {
+    if (!programCameraId) return
+    colorAdjustRef.current.set(programCameraId, clampColorAdjust(next))
+    setColorTick((n) => n + 1)
+  }, [programCameraId])
+
+  const resetProgramColorAdjust = useCallback(() => {
+    if (!programCameraId) return
+    colorAdjustRef.current.delete(programCameraId)
+    setColorTick((n) => n + 1)
+  }, [programCameraId])
+
   const programRotateDeg = programCameraId ? (manualRotateDeg[programCameraId] ?? 0) : 0
   const framingEditable = programLayoutId === 'single' && programCameraId != null
   const layoutEditable = programLayoutId !== 'single'
@@ -1123,7 +1167,10 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
   }, [programCameraId, cancelFramingMotion])
 
   useEffect(() => {
-    if (!framingEditable || !programCameraId) setMotionOpen(false)
+    if (!framingEditable || !programCameraId) {
+      setMotionOpen(false)
+      setColorOpen(false)
+    }
   }, [framingEditable, programCameraId])
 
   const playFramingMotion = useCallback(
@@ -1139,6 +1186,94 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
       )
     },
     [playFramingPresetById, programCameraId, setFramingTargetOnly]
+  )
+
+  const playFramingMotionOnCamera = useCallback(
+    (cameraId: string, presetId: string) => {
+      const { speed, intensity } = loadFramingMotionSettings()
+      playFramingPresetById(
+        cameraId,
+        presetId,
+        () => framingTargetRef.current.get(cameraId) ?? FRAMING_NEUTRAL,
+        setFramingTargetOnly,
+        { speed, intensity, framingNeutral: FRAMING_NEUTRAL }
+      )
+    },
+    [playFramingPresetById, setFramingTargetOnly]
+  )
+
+  const assignMotionToTarget = useCallback(
+    (presetId: string) => {
+      const target = motionAssignTargetId ?? programCameraId
+      if (!target) {
+        onStatus('Elegí una cámara al programa para asignar movimientos.')
+        return
+      }
+      if (cameraMotionProgram.addPreset(target, presetId)) {
+        const meta = resolveMotionPresetDisplay(presetId)
+        onStatus(
+          meta
+            ? `«${meta.label}» añadido a ${cameraAliases.resolve(target)} (al entrar).`
+            : 'Movimiento añadido.'
+        )
+      } else {
+        onStatus('No se pudo añadir (límite de 4 o ya estaba asignado).')
+      }
+    },
+    [cameraMotionProgram, motionAssignTargetId, programCameraId, cameraAliases, onStatus]
+  )
+
+  useEffect(() => {
+    if (programCameraId) setMotionAssignTargetId(programCameraId)
+  }, [programCameraId])
+
+  const motionAssignLabel = motionAssignTargetId
+    ? cameraAliases.resolve(motionAssignTargetId)
+    : 'cámara al aire'
+
+  const runCameraEnterProgram = useCallback(
+    (cameraId: string) => {
+      if (programLayoutId !== 'single' || cropEditOpen) return
+      const presetIds = cameraMotionProgram.getPresetIds(cameraId)
+      if (!presetIds.length) return
+      const { speed, intensity } = loadFramingMotionSettings()
+      startFramingEnterProgram(
+        cameraId,
+        presetIds,
+        () => framingTargetRef.current.get(cameraId) ?? FRAMING_NEUTRAL,
+        setFramingTargetOnly,
+        { speed, intensity, framingNeutral: FRAMING_NEUTRAL },
+        FRAMING_NEUTRAL
+      )
+    },
+    [
+      programLayoutId,
+      cropEditOpen,
+      cameraMotionProgram,
+      startFramingEnterProgram,
+      setFramingTargetOnly
+    ]
+  )
+
+  const prevProgramCameraForMotionRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (programLayoutId !== 'single' || cropEditOpen) return
+    const id = programCameraId
+    if (!id || id === prevProgramCameraForMotionRef.current) return
+    prevProgramCameraForMotionRef.current = id
+    runCameraEnterProgram(id)
+  }, [programCameraId, programLayoutId, cropEditOpen, runCameraEnterProgram])
+
+  const assignCameraToProgram = useCallback(
+    (cameraId: string) => {
+      if (programLayoutId !== 'single') {
+        setSlotForLayout(programLayoutId, selectedLayoutSlot, cameraId)
+        return
+      }
+      pickProgramCamera(cameraId)
+    },
+    [pickProgramCamera, programLayoutId, selectedLayoutSlot, setSlotForLayout]
   )
 
   const activeLayoutGeometry = useMemo((): NormalizedSlotRect[] => {
@@ -1199,13 +1334,14 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
       cropTargetRef.current.delete(cameraId)
       framingTargetRef.current.delete(cameraId)
       framingCurrentRef.current.delete(cameraId)
+      cameraMotionProgram.removeCamera(cameraId)
       setManualRotateDeg((prev) => {
         const n = { ...prev }
         delete n[cameraId]
         return n
       })
     },
-    [programCameraId]
+    [programCameraId, cameraMotionProgram]
   )
 
   useEffect(() => {
@@ -1277,6 +1413,11 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
   )
 
   const onProgramMouseUp = useCallback(() => {
+    const drag = programDragRef.current
+    if (!drag?.moved) programDragRef.current = null
+  }, [])
+
+  const onProgramMouseLeave = useCallback(() => {
     programDragRef.current = null
   }, [])
 
@@ -1481,6 +1622,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
     fusionPreviewBlobRef.current = blob
     if (fusionPreviewUrl) URL.revokeObjectURL(fusionPreviewUrl)
     const url = URL.createObjectURL(blob)
+    setFusionPreviewRecordedSec(tEnd)
     setFusionPreviewUrl(url)
     const sid = sessionId ?? Date.now()
     setFusionExportFileName(`fusion-${sid}-${Date.now()}.webm`)
@@ -1526,12 +1668,17 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
     onStatus(`Guardando WebM: ${name}${GLYPH.ellipsis}`)
     try {
       const buf = await blob.arrayBuffer()
-      await window.studio.saveVideo(filePath, buf)
+      const trim = previewTrim.getTrimForExport()
+      await window.studio.saveVideo(filePath, buf, trim)
       fusionPreviewBlobRef.current = null
       fusionPreviewMimeRef.current = undefined
       if (fusionPreviewUrl) URL.revokeObjectURL(fusionPreviewUrl)
       setFusionPreviewUrl(null)
-      onStatus(`Fusión guardada (WebM): ${name}`)
+      onStatus(
+        trim
+          ? `Fusión guardada (WebM recortado): ${name}`
+          : `Fusión guardada (WebM): ${name}`
+      )
     } catch (e) {
       onStatus(`Error al guardar WebM: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
@@ -1539,7 +1686,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
       setFusionExportTarget(null)
       setFusionExportStartMs(null)
     }
-  }, [fusionExportFileName, fusionPreviewUrl, outputDir, sessionId, onStatus])
+  }, [fusionExportFileName, fusionPreviewUrl, outputDir, sessionId, onStatus, previewTrim])
 
   const saveFusionPreviewAsMp4 = useCallback(async () => {
     const blob = fusionPreviewBlobRef.current
@@ -1558,7 +1705,8 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
     onStatus(`Generando MP4 con FFmpeg (puede tardar según la duración)${GLYPH.ellipsis}`)
     try {
       const buf = await blob.arrayBuffer()
-      const r = await window.studio.saveFusionMp4(filePath, buf)
+      const trim = previewTrim.getTrimForExport()
+      const r = await window.studio.saveFusionMp4(filePath, buf, trim)
       if (!r.ok) {
         onStatus(`No se pudo exportar MP4: ${r.message}`)
         return
@@ -1567,7 +1715,9 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
       fusionPreviewMimeRef.current = undefined
       if (fusionPreviewUrl) URL.revokeObjectURL(fusionPreviewUrl)
       setFusionPreviewUrl(null)
-      onStatus(`Fusión guardada (MP4): ${name}`)
+      onStatus(
+        trim ? `Fusión guardada (MP4 recortado): ${name}` : `Fusión guardada (MP4): ${name}`
+      )
     } catch (e) {
       onStatus(`Error al exportar MP4: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
@@ -1575,7 +1725,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
       setFusionExportTarget(null)
       setFusionExportStartMs(null)
     }
-  }, [fusionExportFileName, fusionPreviewUrl, outputDir, sessionId, onStatus])
+  }, [fusionExportFileName, fusionPreviewUrl, outputDir, sessionId, onStatus, previewTrim])
 
   /**
    * Cierra por completo la sesión de Fusión (archivos): descarta pistas, plan, vista previa
@@ -1631,6 +1781,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
   const discardFusionPreview = useCallback(() => {
     fusionPreviewBlobRef.current = null
     fusionPreviewMimeRef.current = undefined
+    setFusionPreviewRecordedSec(undefined)
     if (fusionPreviewUrl) URL.revokeObjectURL(fusionPreviewUrl)
     setFusionPreviewUrl(null)
     setFusionExportFileName('')
@@ -1813,10 +1964,34 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
     !outputDir ||
     fusionPreviewUrl !== null
 
+  const hotkeyActiveCameraId =
+    programLayoutId === 'single' ? programCameraId : (programSlots[selectedLayoutSlot] ?? programSlots[0] ?? null)
+
+  useFusionProgramHotkeys({
+    workspaceActive,
+    enabled: clips.length > 0,
+    blocked: closeSessionConfirm || configPopoverOpen || fusionPreviewUrl !== null,
+    cameraIds,
+    activeCameraId: hotkeyActiveCameraId,
+    onAssignCamera: assignCameraToProgram,
+    onTogglePlay: () => void togglePlay(),
+    canPlay: clips.length > 0 || fusionPreviewUrl !== null,
+    onRecordStart: () => void startFusionRecord(),
+    onRecordStop: () => void stopFusionRecord(),
+    recording: fusionRecording,
+    canRecord:
+      !liveRecording &&
+      clips.length > 0 &&
+      Boolean(programCameraId) &&
+      Boolean(outputDir) &&
+      fusionPreviewUrl === null &&
+      !fusionRecording
+  })
+
   return (
     <div style={workspaceInnerCard}>
       {closeSessionConfirm ? (
-        <StudioConfirmForm
+        <StudioConfirmModal
           message={
             <>
               ¿Cerrar esta sesión de fusión?
@@ -1830,6 +2005,37 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
           danger
           onConfirm={doCloseFusionSession}
           onCancel={() => setCloseSessionConfirm(false)}
+        />
+      ) : null}
+
+      {fusionPreviewUrl ? (
+        <FusionRecordingPreviewOverlay
+          mode="files"
+          videoUrl={fusionPreviewUrl}
+          fileName={fusionExportFileName}
+          onFileNameChange={setFusionExportFileName}
+          outputDir={outputDir}
+          exportBusy={fusionExportBusy}
+          exportTarget={fusionExportTarget}
+          exportElapsed={fusionExportElapsed}
+          onSaveWebm={() => void saveFusionPreviewToDisk()}
+          onSaveMp4={() => void saveFusionPreviewAsMp4()}
+          onDiscard={discardFusionPreview}
+          videoRef={fusionPreviewVideoRef}
+          wrapRef={fusionPreviewWrapRef}
+          isFullscreen={fusionPreviewIsFullscreen}
+          pseudoFullscreen={fusionPreviewPseudoFullscreen}
+          onToggleFullscreen={toggleFusionPreviewFullscreen}
+          onPreviewPlay={() => setFusionPreviewPlaying(true)}
+          onPreviewPause={() => setFusionPreviewPlaying(false)}
+          durationSec={previewTrim.durationSec}
+          trimInSec={previewTrim.trimInSec}
+          trimOutSec={previewTrim.trimOutSec}
+          exportDurationSec={previewTrim.exportDurationSec}
+          onTrimInChange={previewTrim.setTrimInSec}
+          onTrimOutChange={previewTrim.setTrimOutSec}
+          onVideoDuration={previewTrim.onVideoDuration}
+          fallbackRecordedSec={fusionPreviewRecordedSec}
         />
       ) : null}
 
@@ -1867,24 +2073,6 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
             }}
           >
             {clips.length === 0 ? `Cargar pistas WebM${GLYPH.ellipsis}` : `Cambiar pistas${GLYPH.ellipsis}`}
-          </button>
-          <button
-            type="button"
-            onClick={() => setEqOpen((v) => !v)}
-            disabled={!audioUrl}
-            title={
-              audioUrl
-                ? 'Ecualizador del audio de la mezcla (afecta la grabación).'
-                : 'Necesitás audio-*.webm en la sesión cargada.'
-            }
-            style={{
-              ...btnAudio,
-              opacity: audioUrl ? 1 : 0.5,
-              cursor: audioUrl ? 'pointer' : 'not-allowed'
-            }}
-          >
-            <span aria-hidden style={{ fontSize: 14 }}>{GLYPH.eq}</span>
-            {audioGraph.gains.some((g) => Math.abs(g) > 0.05) && !audioGraph.bypass ? ' EQ · activo' : ' EQ'}
           </button>
         </div>
         {clips.length === 0 ? (
@@ -2021,7 +2209,7 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
                     onMouseDown={onProgramMouseDown}
                     onMouseMove={onProgramMouseMove}
                     onMouseUp={onProgramMouseUp}
-                    onMouseLeave={onProgramMouseUp}
+                    onMouseLeave={onProgramMouseLeave}
                     onClick={onProgramClick}
                     onDoubleClick={onProgramDoubleClick}
                     style={{
@@ -2115,16 +2303,48 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
                 </div>
               </div>
                 </div>
-                <FusionCameraPlanBar
-                  visible={clips.length > 0}
-                  segments={timelineSegments}
-                  scaleDuration={timelineScaleDuration}
-                  currentTime={fusionPlanTimeSec}
-                  segmentColor={(id) => fusionSegmentColor(fusionCameraColors, id)}
-                  resolveAlias={cameraAliases.resolve}
-                  legendCameraIds={cameraIds}
-                  onSeek={(t) => seek(fusionRecordStartSecRef.current + t)}
-                />
+                <div className="fusion-program-dock">
+                  <FusionStudioTransport
+                    mode="files"
+                    visible
+                    playing={transportPlaying}
+                    fusionRecording={fusionRecording}
+                    fusionRecorderPaused={fusionRecorderPaused}
+                    fusionPreviewUrl={fusionPreviewUrl}
+                    recordPauseSupported={fusionRecorderSupportsPause}
+                    canRecord={!disabledFusion}
+                    canPlay={clips.length > 0 || fusionPreviewUrl !== null}
+                    canCloseSession={
+                      !(
+                        fusionRecording ||
+                        fusionExportBusy ||
+                        (!clips.length && !audioUrl && !fusionPreviewUrl && !sessionId)
+                      )
+                    }
+                    currentTime={currentTime}
+                    duration={duration}
+                    onTogglePlay={() => void togglePlay()}
+                    onRecordStart={() => void startFusionRecord()}
+                    onRecordPause={pauseFusionRecording}
+                    onRecordResume={() => void resumeFusionRecording()}
+                    onRecordStop={() => void stopFusionRecord()}
+                    onCloseSession={closeFusionSession}
+                  />
+                  <FusionCameraPlanBar
+                    visible={clips.length > 0}
+                    segments={timelineSegments}
+                    scaleDuration={timelineScaleDuration}
+                    currentTime={fusionPlanTimeSec}
+                    segmentColor={(id) => fusionSegmentColor(fusionCameraColors, id)}
+                    resolveAlias={cameraAliases.resolve}
+                    legendCameraIds={cameraIds}
+                    onSeek={(t) => seek(fusionRecordStartSecRef.current + t)}
+                  />
+                </div>
+                <p className="fusion-hotkeys-hint">
+                  Atajos: <kbd>1</kbd>–<kbd>9</kbd> cámara · <kbd>←</kbd>
+                  <kbd>→</kbd> anterior/siguiente · <kbd>Espacio</kbd> play · <kbd>R</kbd> grabar
+                </p>
                 </div>
                 {clips.length > 0 ? (
                   <aside className="fusion-program-rail fusion-program-rail--right">
@@ -2132,8 +2352,19 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
                       background={programBackground}
                       onBackgroundChange={setProgramBackground}
                     />
+                    <FusionEqTrigger
+                      active={eqOpen}
+                      disabled={!audioUrl}
+                      processing={audioGraph.gains.some((g) => Math.abs(g) > 0.05) && !audioGraph.bypass}
+                      onClick={() => setEqOpen((v) => !v)}
+                    />
                     {framingEditable && programCameraId ? (
                       <>
+                        <FusionColorTrigger
+                          active={colorOpen}
+                          processing={programColorActive}
+                          onClick={() => setColorOpen((v) => !v)}
+                        />
                         <FusionProgramTools
                           cropEditOpen={cropEditOpen}
                           programCrop={programCrop}
@@ -2232,6 +2463,14 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
                       >
                         {GLYPH.close}
                       </button>
+                      <FusionCameraMotionChips
+                        cameraId={c.cameraId}
+                        presetIds={cameraMotionProgram.getPresetIds(c.cameraId)}
+                        disabled={cropEditOpen}
+                        onRemoveAt={(index) => cameraMotionProgram.removePresetAt(c.cameraId, index)}
+                        onAddPreset={(presetId) => cameraMotionProgram.addPreset(c.cameraId, presetId)}
+                        onPreviewPreset={(presetId) => playFramingMotionOnCamera(c.cameraId, presetId)}
+                      />
                     </div>
                     <div
                       style={{
@@ -2253,33 +2492,6 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
             </div>
           </aside>
             </div>
-
-          <FusionStudioTransport
-            mode="files"
-            visible
-            playing={transportPlaying}
-            fusionRecording={fusionRecording}
-            fusionRecorderPaused={fusionRecorderPaused}
-            fusionPreviewUrl={fusionPreviewUrl}
-            recordPauseSupported={fusionRecorderSupportsPause}
-            canRecord={!disabledFusion}
-            canPlay={clips.length > 0 || fusionPreviewUrl !== null}
-            canCloseSession={
-              !(
-                fusionRecording ||
-                fusionExportBusy ||
-                (!clips.length && !audioUrl && !fusionPreviewUrl && !sessionId)
-              )
-            }
-            currentTime={currentTime}
-            duration={duration}
-            onTogglePlay={() => void togglePlay()}
-            onRecordStart={() => void startFusionRecord()}
-            onRecordPause={pauseFusionRecording}
-            onRecordResume={() => void resumeFusionRecording()}
-            onRecordStop={() => void stopFusionRecord()}
-            onCloseSession={closeFusionSession}
-          />
 
             <div className="fusion-video-decoders" aria-hidden>
               {clips.map((c) => (
@@ -2304,215 +2516,10 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
                 />
               ))}
             </div>
-                {fusionPreviewUrl ? (
-                  <div
-                    style={{
-                      marginTop: 12,
-                      padding: 12,
-                      borderRadius: 10,
-                      border: '1px solid #334155',
-                      background: '#0c121c'
-                    }}
-                  >
-                    <div style={{ fontSize: 12, fontWeight: 700, color: '#e2e8f0', marginBottom: 6 }}>
-                      Vista previa
-                    </div>
-                    <div style={{ fontSize: 11, color: '#64748b', marginBottom: 8, lineHeight: 1.4 }}>
-                      Play solo reproduce esta toma. La línea de tiempo de abajo mueve las pistas y sincroniza la
-                      vista previa. <strong>MP4</strong> suele ir mejor en el Reproductor de Windows; WebM es más rápido
-                      al guardar.
-                    </div>
-                    <label
-                      htmlFor="fusion-export-filename"
-                      style={{ display: 'block', fontSize: 11, fontWeight: 600, color: '#94a3b8', marginBottom: 6 }}
-                    >
-                      Nombre de archivo
-                    </label>
-                    <input
-                      id="fusion-export-filename"
-                      type="text"
-                      value={fusionExportFileName}
-                      onChange={(e) => setFusionExportFileName(e.target.value)}
-                      spellCheck={false}
-                      autoComplete="off"
-                      disabled={fusionExportBusy}
-                      placeholder="mi-fusion.webm"
-                      style={{
-                        width: '100%',
-                        maxWidth: 420,
-                        boxSizing: 'border-box',
-                        marginBottom: 10,
-                        padding: '8px 10px',
-                        borderRadius: 8,
-                        border: '1px solid #475569',
-                        background: '#020617',
-                        color: '#e2e8f0',
-                        fontSize: 13
-                      }}
-                    />
-                    <div
-                      ref={fusionPreviewWrapRef}
-                      className={
-                        'fusion-export-preview-wrap' +
-                        (fusionPreviewPseudoFullscreen ? ' fusion-export-preview-wrap--pseudo-fs' : '')
-                      }
-                    >
-                      <button
-                        type="button"
-                        onClick={() => void toggleFusionPreviewFullscreen()}
-                        style={{
-                          position: 'absolute',
-                          top: 8,
-                          right: 8,
-                          zIndex: 3,
-                          padding: '6px 12px',
-                          borderRadius: 8,
-                          border: '1px solid rgba(148,163,184,0.5)',
-                          background: 'rgba(15,23,42,0.92)',
-                          color: '#e2e8f0',
-                          fontSize: 12,
-                          fontWeight: 600,
-                          cursor: 'pointer'
-                        }}
-                      >
-                        {fusionPreviewIsFullscreen || fusionPreviewPseudoFullscreen
-                          ? 'Salir de pantalla completa'
-                          : 'Pantalla completa'}
-                      </button>
-                      <video
-                        ref={fusionPreviewVideoRef}
-                        src={fusionPreviewUrl}
-                        controls
-                        controlsList="nofullscreen"
-                        playsInline
-                        preload="metadata"
-                        className="fusion-export-preview-video"
-                        style={{
-                          width: '100%',
-                          maxHeight: 'min(36vh, 320px)',
-                          borderRadius: 8,
-                          background: '#000',
-                          display: 'block'
-                        }}
-                        onPlay={() => setFusionPreviewPlaying(true)}
-                        onPause={() => setFusionPreviewPlaying(false)}
-                      />
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-                      <button
-                        type="button"
-                        disabled={!outputDir || fusionExportBusy}
-                        onClick={() => void saveFusionPreviewToDisk()}
-                        style={{
-                          padding: '8px 14px',
-                          borderRadius: 8,
-                          border: '1px solid #047857',
-                          background: !outputDir || fusionExportBusy ? '#334155' : '#065f46',
-                          color: '#ecfdf5',
-                          fontWeight: 600,
-                          opacity: fusionExportBusy ? 0.85 : 1,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 8
-                        }}
-                      >
-                        {fusionExportTarget === 'webm' ? (
-                          <>
-                            <span className="studio-spinner" aria-hidden /> Guardando WebM{GLYPH.ellipsis}
-                          </>
-                        ) : (
-                          'Guardar WebM'
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={!outputDir || fusionExportBusy}
-                        onClick={() => void saveFusionPreviewAsMp4()}
-                        style={{
-                          padding: '8px 14px',
-                          borderRadius: 8,
-                          border: '1px solid #1d4ed8',
-                          background: !outputDir || fusionExportBusy ? '#334155' : '#1e40af',
-                          color: '#eff6ff',
-                          fontWeight: 600,
-                          opacity: fusionExportBusy ? 0.85 : 1,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 8
-                        }}
-                      >
-                        {fusionExportTarget === 'mp4' ? (
-                          <>
-                            <span className="studio-spinner" aria-hidden /> Generando MP4{GLYPH.ellipsis}
-                          </>
-                        ) : (
-                          'Guardar MP4'
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={fusionExportBusy}
-                        onClick={() => discardFusionPreview()}
-                        style={{
-                          padding: '8px 14px',
-                          borderRadius: 8,
-                          border: '1px solid #475569',
-                          background: '#1e293b',
-                          color: '#e2e8f0',
-                          fontWeight: 600
-                        }}
-                      >
-                        Descartar vista previa
-                      </button>
-                    </div>
-                    {fusionExportTarget ? (
-                      <div
-                        role="status"
-                        aria-live="polite"
-                        style={{
-                          marginTop: 10,
-                          padding: '10px 12px',
-                          borderRadius: 10,
-                          border: fusionExportTarget === 'mp4' ? '1px solid #1d4ed8' : '1px solid #047857',
-                          background: fusionExportTarget === 'mp4' ? '#0b1a3a' : '#062018',
-                          color: fusionExportTarget === 'mp4' ? '#dbeafe' : '#bbf7d0',
-                          fontSize: 12,
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 8
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <span className="studio-spinner lg" aria-hidden />
-                          <div style={{ flex: 1, minWidth: 0, lineHeight: 1.45 }}>
-                            <strong>
-                              {fusionExportTarget === 'mp4'
-                                ? `Generando MP4${GLYPH.ellipsis}`
-                                : `Guardando WebM${GLYPH.ellipsis}`}
-                            </strong>{' '}
-                            {fusionExportTarget === 'mp4'
-                              ? 'Convirtiendo a H.264 (puede tardar; no cierres la app).'
-                              : 'Guardando en la carpeta de grabación…'}
-                          </div>
-                          <span
-                            style={{
-                              fontVariantNumeric: 'tabular-nums',
-                              fontWeight: 700,
-                              fontSize: 13
-                            }}
-                          >
-                            {Math.floor(fusionExportElapsed / 1000)}s
-                          </span>
-                        </div>
-                        <div className="studio-progress-bar" aria-hidden />
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
 
             </div>
           </div>
+        </div>
       ) : null}
 
       {configPopoverOpen ? (
@@ -2841,8 +2848,22 @@ export function FusionPanel({ outputDir, liveRecording, onStatus }: FusionPanelP
             : FRAMING_NEUTRAL
         }
         onPlay={playFramingMotion}
+        onAssign={assignMotionToTarget}
         onStop={cancelFramingMotion}
         onStatus={onStatus}
+        programMode={motionProgramMode}
+        onProgramModeChange={setMotionProgramMode}
+        assignTargetLabel={motionAssignLabel}
+      />
+
+      <FloatingColorPanel
+        open={colorOpen && framingEditable && programCameraId != null}
+        onClose={() => setColorOpen(false)}
+        disabled={fusionExportBusy}
+        cameraLabel={programCameraId ? cameraAliases.resolve(programCameraId) : ''}
+        adjust={programColorAdjust}
+        onChange={setProgramColorAdjust}
+        onReset={resetProgramColorAdjust}
       />
     </div>
   )

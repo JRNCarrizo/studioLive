@@ -19,10 +19,15 @@ declare global {
       pickImageFile: () => Promise<string | null>
       readImageDataUrl: (absPath: string) => Promise<string | null>
       pathToFileUrl: (absPath: string) => Promise<string | null>
-      saveVideo: (filePath: string, data: ArrayBuffer) => Promise<boolean>
+      saveVideo: (
+        filePath: string,
+        data: ArrayBuffer,
+        trim?: { startSec: number; endSec: number }
+      ) => Promise<boolean>
       saveFusionMp4: (
         outputPath: string,
-        data: ArrayBuffer
+        data: ArrayBuffer,
+        trim?: { startSec: number; endSec: number }
       ) => Promise<{ ok: true } | { ok: false; message: string }>
       prepareRecordingFolder: (
         parentDir: string,
@@ -42,6 +47,10 @@ declare global {
           kind: 'screen' | 'window'
         }>
       >
+      getAppVersion: () => Promise<string>
+      checkForUpdates: () => Promise<{ ok: true } | { ok: false; reason?: 'dev'; message?: string }>
+      installUpdate: () => Promise<boolean>
+      onUpdateEvent: (callback: (payload: unknown) => void) => () => void
     }
   }
 }

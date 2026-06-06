@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 type DialogActionsProps = {
   submitLabel: string
@@ -107,5 +108,57 @@ export function StudioConfirmForm({
         onCancel={onCancel}
       />
     </div>
+  )
+}
+
+type StudioConfirmModalProps = {
+  message: ReactNode
+  disabled?: boolean
+  submitLabel?: string
+  danger?: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}
+
+/** Confirmación centrada en pantalla (no inline arriba del scroll). */
+export function StudioConfirmModal({
+  message,
+  disabled,
+  submitLabel,
+  danger,
+  onConfirm,
+  onCancel
+}: StudioConfirmModalProps) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        onCancel()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onCancel])
+
+  return createPortal(
+    <div
+      className="studio-modal-overlay"
+      role="presentation"
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) onCancel()
+      }}
+    >
+      <div className="studio-modal-panel">
+        <StudioConfirmForm
+          message={message}
+          disabled={disabled}
+          submitLabel={submitLabel}
+          danger={danger}
+          onConfirm={onConfirm}
+          onCancel={onCancel}
+        />
+      </div>
+    </div>,
+    document.body
   )
 }

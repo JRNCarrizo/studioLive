@@ -2,6 +2,7 @@ import http from 'node:http'
 import https from 'node:https'
 import os from 'node:os'
 import path from 'node:path'
+import { app } from 'electron'
 import express from 'express'
 import type { WebSocket } from 'ws'
 import { WebSocketServer } from 'ws'
@@ -279,5 +280,8 @@ export async function createSignalingServer(opts: {
 }
 
 export function cameraClientDir(): string {
+  if (app.isPackaged) {
+    return path.join(process.resourcesPath, 'camera-client')
+  }
   return path.join(process.cwd(), 'camera-client')
 }

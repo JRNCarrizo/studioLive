@@ -319,30 +319,37 @@ button:not(:disabled) {
   color: #e2e8f0;
 }
 
-/* Fusión con archivos — barra de transporte anclada bajo el programa */
+/* Transporte fusión / ISO / programa — compacto, anclado abajo-izq o flotante */
 .fusion-dock-transport {
   flex-shrink: 0;
-  width: 100%;
-  border-radius: 8px;
+  border-radius: 10px;
   border: 1px solid #334155;
   background: linear-gradient(180deg, #0c121c 0%, #070b12 100%);
-  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.25);
   overflow: hidden;
 }
 
 .fusion-dock-transport--docked {
-  position: sticky;
-  bottom: 0;
-  z-index: 12;
-  margin-top: 6px;
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 100%;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
 }
 
 .fusion-dock-transport--floating {
   position: fixed;
   z-index: 55;
-  width: min(420px, calc(100vw - 16px));
+  width: max-content;
+  max-width: min(360px, calc(100vw - 16px));
   border-radius: 10px;
+  border: 1px solid #334155;
+  background: linear-gradient(180deg, #0c121c 0%, #070b12 100%);
   box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+  /* left/top desde inline style al arrastrar */
 }
 
 .fusion-dock-transport--live {
@@ -359,21 +366,85 @@ button:not(:disabled) {
 
 .fusion-dock-transport__toolbar {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 6px 8px 8px;
+  border-bottom: none;
+  box-sizing: border-box;
+}
+
+.fusion-dock-transport__top {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+}
+
+.fusion-dock-transport__float-btn {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  font-size: 10px;
+}
+
+.fusion-dock-transport__head {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 6px 8px;
-  padding: 4px 8px;
-  border-bottom: 1px solid #1e293b;
-  min-height: 36px;
+  justify-content: center;
+  gap: 5px;
 }
 
 .fusion-dock-transport--floating .fusion-dock-transport__toolbar {
+  align-items: center;
+  padding: 6px 10px 8px;
+  border-bottom: 1px solid #1e293b;
   cursor: grab;
   user-select: none;
 }
 
 .fusion-dock-transport--floating .fusion-dock-transport__toolbar:active {
   cursor: grabbing;
+}
+
+.fusion-dock-transport--floating .fusion-dock-transport__top {
+  width: 100%;
+  max-width: 100%;
+}
+
+.fusion-dock-transport--docked .fusion-dock-transport__toolbar {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 6px 10px;
+}
+
+.fusion-dock-transport--docked .fusion-dock-transport__top {
+  flex: 1 1 auto;
+  align-items: center;
+}
+
+.fusion-dock-transport--docked .fusion-dock-transport__head {
+  justify-content: flex-start;
+}
+
+.fusion-dock-transport--docked .fusion-dock-transport__buttons {
+  flex: 0 1 auto;
+  justify-content: flex-end;
+}
+
+.fusion-dock-transport__time {
+  flex: none;
+  font-size: 12px;
+}
+
+.fusion-dock-transport__sources {
+  max-width: 120px;
 }
 
 .fusion-dock-transport__toolbar-left {
@@ -439,7 +510,6 @@ button:not(:disabled) {
 }
 
 .fusion-dock-transport__time {
-  font-size: 12px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   font-family: ui-monospace, 'Cascadia Code', monospace;
@@ -449,7 +519,6 @@ button:not(:disabled) {
 .fusion-dock-transport__sources {
   font-size: 10px;
   color: #64748b;
-  max-width: min(200px, 28vw);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -457,10 +526,11 @@ button:not(:disabled) {
 
 .fusion-dock-transport__status {
   margin: 0;
-  padding: 4px 10px 6px;
-  font-size: 11px;
+  padding: 3px 8px 5px;
+  font-size: 10px;
   color: #94a3b8;
   line-height: 1.35;
+  text-align: center;
   border-top: 1px solid #1e293b;
 }
 
@@ -468,10 +538,24 @@ button:not(:disabled) {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
-  flex: 1 1 auto;
-  justify-content: flex-end;
+  justify-content: center;
+  gap: 3px;
+  width: 100%;
   min-width: 0;
+}
+
+.fusion-dock-transport--floating .fusion-dock-transport__buttons {
+  width: 100%;
+  justify-content: center;
+}
+
+.fusion-dock-transport--floating .fusion-dock-btn {
+  padding: 4px 6px;
+  min-height: 26px;
+}
+
+.fusion-dock-transport--floating .fusion-dock-btn__label {
+  font-size: 10px;
 }
 
 .fusion-dock-btn {
@@ -512,9 +596,16 @@ button:not(:disabled) {
 }
 
 .fusion-dock-btn--record {
-  border-color: #6d28d9;
-  background: #5b21b6;
-  color: #f5f3ff;
+  border-color: #991b1b;
+  background: #dc2626;
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.2);
+}
+
+.fusion-dock-btn--record:hover:not(:disabled) {
+  border-color: #b91c1c;
+  background: #ef4444;
+  color: #fff;
 }
 
 .fusion-dock-btn--pause {
@@ -840,6 +931,89 @@ button:not(:disabled) {
   width: 84px;
 }
 
+/* Control compacto (2 filas) a la izquierda + barra de bloques a la derecha */
+.fusion-program-dock {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
+  width: 100%;
+  margin-top: 0;
+  border-radius: 8px;
+  border: 1px solid #334155;
+  background: #0a1018;
+  box-sizing: border-box;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.fusion-hotkeys-hint {
+  margin: 4px 0 0;
+  padding: 0 4px;
+  font-size: 10px;
+  line-height: 1.45;
+  color: #64748b;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.fusion-hotkeys-hint kbd {
+  display: inline-block;
+  margin: 0 1px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #94a3b8;
+  font-size: 9px;
+  font-family: inherit;
+}
+
+.fusion-program-dock .fusion-dock-transport--docked {
+  flex: 0 0 auto;
+  width: auto;
+  align-self: center;
+  margin: 4px 0;
+  border-right: 1px solid #1e293b;
+}
+
+/* Anclado en dock: 2 filas (tiempo arriba, botones abajo), flotante a la izquierda */
+.fusion-program-dock .fusion-dock-transport--docked .fusion-dock-transport__toolbar {
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: max-content;
+  min-width: 0;
+  padding: 6px 10px 8px;
+}
+
+.fusion-program-dock .fusion-dock-transport--docked .fusion-dock-transport__top {
+  width: 100%;
+  align-items: flex-start;
+}
+
+.fusion-program-dock .fusion-dock-transport--docked .fusion-dock-transport__head {
+  justify-content: center;
+}
+
+.fusion-program-dock .fusion-dock-transport--docked .fusion-dock-transport__buttons {
+  width: 100%;
+  justify-content: center;
+}
+
+.fusion-program-dock .fusion-camera-plan {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  align-self: stretch;
+}
+
+.fusion-program-dock .fusion-camera-plan:only-child {
+  flex: 1 1 auto;
+}
+
 .fusion-scene-switcher {
   display: flex;
   flex-direction: column;
@@ -1025,7 +1199,8 @@ button:not(:disabled) {
   gap: 6px;
 }
 
-.fusion-motion-trigger {
+/* Botones verticales del riel del programa (Mov., EQ, …) */
+.fusion-rail-trigger {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -1045,19 +1220,69 @@ button:not(:disabled) {
     color 0.15s;
 }
 
-.fusion-motion-trigger:hover:not(:disabled) {
+.fusion-rail-trigger:hover:not(:disabled) {
   border-color: #38bdf8;
   color: #e0f2fe;
   background: #0c4a6e;
 }
 
-.fusion-motion-trigger--on {
+.fusion-rail-trigger--on {
   border-color: #38bdf8 !important;
   background: #0c4a6e !important;
   color: #e0f2fe !important;
 }
 
-.fusion-motion-trigger--playing .fusion-motion-trigger__icon {
+.fusion-rail-trigger__icon {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.fusion-rail-trigger__label {
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.fusion-rail-trigger:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.fusion-eq-trigger:hover:not(:disabled) {
+  border-color: #7c3aed;
+  color: #ede9fe;
+  background: #4c1d95;
+}
+
+.fusion-eq-trigger.fusion-rail-trigger--on {
+  border-color: #7c3aed !important;
+  background: #4c1d95 !important;
+  color: #ede9fe !important;
+}
+
+.fusion-eq-trigger--processing .fusion-rail-trigger__label {
+  color: #c4b5fd;
+}
+
+.fusion-color-trigger:hover:not(:disabled) {
+  border-color: #d97706;
+  color: #fef3c7;
+  background: #78350f;
+}
+
+.fusion-color-trigger.fusion-rail-trigger--on {
+  border-color: #d97706 !important;
+  background: #78350f !important;
+  color: #fef3c7 !important;
+}
+
+.fusion-color-trigger--processing .fusion-rail-trigger__label {
+  color: #fcd34d;
+}
+
+.fusion-motion-trigger--playing .fusion-rail-trigger__icon {
   animation: fusion-motion-pulse 1.2s ease-in-out infinite;
 }
 
@@ -1069,24 +1294,6 @@ button:not(:disabled) {
   50% {
     opacity: 0.45;
   }
-}
-
-.fusion-motion-trigger:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.fusion-motion-trigger__icon {
-  font-size: 18px;
-  line-height: 1;
-}
-
-.fusion-motion-trigger__label {
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #94a3b8;
 }
 
 .fusion-float-motion {
@@ -1112,6 +1319,10 @@ button:not(:disabled) {
   align-items: center;
   gap: 6px;
   padding: 8px 10px;
+  min-height: 36px;
+  max-height: 36px;
+  box-sizing: border-box;
+  flex-wrap: nowrap;
   background: #0f172a;
   border-bottom: 1px solid #1e293b;
   cursor: grab;
@@ -1134,9 +1345,27 @@ button:not(:disabled) {
 
 .fusion-float-motion__title {
   flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
   font-size: 11px;
   font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.fusion-float-motion__title-base {
+  flex-shrink: 0;
+}
+
+.fusion-float-motion__title-active {
   min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  font-weight: 600;
+  color: #7dd3fc;
 }
 
 .fusion-float-motion__badge {
@@ -1144,10 +1373,10 @@ button:not(:disabled) {
   font-weight: 700;
   color: #7dd3fc;
   margin-left: 4px;
-}
-
-.fusion-float-motion__badge--inline {
-  display: inline;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 72px;
 }
 
 .fusion-float-motion__chrome-actions {
@@ -1162,12 +1391,368 @@ button:not(:disabled) {
   overflow-y: auto;
 }
 
+.fusion-float-color {
+  position: fixed;
+  z-index: 64;
+  width: 200px;
+  max-width: calc(100vw - 16px);
+  border-radius: 12px;
+  border: 1px solid #334155;
+  background: #0b1220;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  color: #e2e8f0;
+  overflow: hidden;
+}
+
+.fusion-float-color--collapsed {
+  width: auto;
+  min-width: 168px;
+}
+
+.fusion-float-color__chrome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  min-height: 36px;
+  max-height: 36px;
+  box-sizing: border-box;
+  flex-wrap: nowrap;
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+  cursor: grab;
+  user-select: none;
+}
+
+.fusion-float-color--collapsed .fusion-float-color__chrome {
+  border-bottom: none;
+}
+
+.fusion-float-color__chrome-btn {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px;
+}
+
+.fusion-float-color__title {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.fusion-float-color__title-base {
+  flex-shrink: 0;
+}
+
+.fusion-float-color__title-active {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fcd34d;
+}
+
+.fusion-float-color__chrome-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.fusion-float-color__body {
+  padding: 8px;
+  max-height: min(70vh, 420px);
+  overflow-y: auto;
+}
+
+.fusion-program-color-tools__hint {
+  margin: 0 0 10px;
+  font-size: 10px;
+  line-height: 1.45;
+  color: #64748b;
+}
+
+.fusion-program-color-tools__hint strong {
+  color: #cbd5e1;
+}
+
+.fusion-program-color-tools__row {
+  display: grid;
+  grid-template-columns: 62px 1fr 32px;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 10px;
+  color: #94a3b8;
+  cursor: default;
+}
+
+.fusion-program-color-tools__label {
+  font-weight: 600;
+}
+
+.fusion-program-color-tools__row input[type='range'] {
+  width: 100%;
+  margin: 0;
+  accent-color: #d97706;
+}
+
+.fusion-program-color-tools__value {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+
+.fusion-program-color-tools__actions {
+  margin-top: 4px;
+}
+
+.fusion-program-color-tools__actions button {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid #475569;
+  background: #1e293b;
+  color: #e2e8f0;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fusion-program-color-tools__actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Panel flotante EQ — escala similar a .fusion-float-motion (200px) */
+.fusion-float-eq {
+  position: fixed;
+  z-index: 65;
+  width: 200px;
+  max-width: calc(100vw - 16px);
+  border-radius: 12px;
+  border: 1px solid #334155;
+  background: #0b1220;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+  color: #e2e8f0;
+  font-size: 11px;
+  overflow: hidden;
+}
+
+.fusion-float-eq--collapsed {
+  width: auto;
+  min-width: 168px;
+}
+
+.fusion-float-eq--collapsed .fusion-float-eq__chrome {
+  border-bottom: none;
+}
+
+.fusion-float-eq__chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 8px 10px;
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+  cursor: grab;
+  user-select: none;
+}
+
+.fusion-float-eq__title {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.fusion-float-eq__badge {
+  font-size: 9px;
+  font-weight: 700;
+  color: #7dd3fc;
+  margin-left: 4px;
+}
+
+.fusion-float-eq__chrome-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.fusion-float-eq__chrome-btn {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px;
+}
+
+.fusion-float-eq__body {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(70vh, 420px);
+  overflow-y: auto;
+}
+
+.fusion-float-eq__hint {
+  margin: 0;
+  font-size: 9px;
+  color: #94a3b8;
+  line-height: 1.35;
+}
+
+.fusion-float-eq__hint strong {
+  color: #cbd5e1;
+  font-weight: 600;
+}
+
+.fusion-float-eq__hint-rec {
+  color: #fcd34d;
+}
+
+.fusion-float-eq__toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.fusion-float-eq__preset-label {
+  font-size: 9px;
+  color: #94a3b8;
+  font-weight: 600;
+}
+
+.fusion-float-eq__preset-select {
+  flex: 1;
+  min-width: 0;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #e2e8f0;
+  font-size: 10px;
+}
+
+.fusion-float-eq__bypass {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  color: #94a3b8;
+  margin-left: auto;
+}
+
+.fusion-float-eq__curve-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid #1e293b;
+  background: #020617;
+}
+
+.fusion-float-eq__curve {
+  display: block;
+  width: 176px;
+  height: 58px;
+}
+
+.fusion-float-eq__bands {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 2px;
+}
+
+.fusion-float-eq__band {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+.fusion-float-eq__band-label {
+  font-size: 8px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+.fusion-float-eq__slider {
+  writing-mode: vertical-lr;
+  appearance: slider-vertical;
+  width: 16px;
+  height: 52px;
+  margin: 0;
+  accent-color: #7dd3fc;
+}
+
+.fusion-float-eq__band-db {
+  font-size: 8px;
+  color: #64748b;
+  font-variant-numeric: tabular-nums;
+}
+
+.fusion-float-eq__band-db--active {
+  color: #7dd3fc;
+}
+
+.fusion-float-eq__reset {
+  width: 100%;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #cbd5e1;
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.fusion-float-eq__reset:hover {
+  border-color: #7dd3fc;
+  color: #e0f2fe;
+}
+
 .fusion-program-motion-status {
   display: block;
   font-size: 9px;
   font-weight: 600;
   color: #7dd3fc;
   margin-bottom: 4px;
+}
+
+.fusion-program-motion-section {
+  margin-bottom: 6px;
+}
+
+.fusion-program-motion-section:last-of-type {
+  margin-bottom: 0;
+}
+
+.fusion-program-motion-section-label {
+  display: block;
+  font-size: 8px;
+  font-weight: 600;
+  color: #64748b;
+  margin-bottom: 4px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .fusion-program-motion-grid {
@@ -1177,8 +1762,18 @@ button:not(:disabled) {
   width: 100%;
 }
 
+.fusion-program-motion-btn--sequence {
+  border-color: #475569;
+  background: #0c1424;
+}
+
+.fusion-program-motion-btn--sequence:hover:not(:disabled) {
+  border-color: #a78bfa;
+  color: #ede9fe;
+}
+
 .fusion-program-motion-btn {
-  padding: 4px 2px;
+  padding: 4px 3px;
   border-radius: 6px;
   border: 1px solid #334155;
   background: #0f172a;
@@ -1187,6 +1782,12 @@ button:not(:disabled) {
   font-weight: 600;
   cursor: pointer;
   line-height: 1.2;
+  min-height: 22px;
+  max-height: 22px;
+  box-sizing: border-box;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .fusion-program-motion-btn:hover:not(:disabled) {
@@ -1298,6 +1899,270 @@ button:not(:disabled) {
 .fusion-program-tool-actions--motion {
   flex-wrap: wrap;
   margin-top: 4px;
+}
+
+.studio-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  background: rgba(2, 6, 23, 0.88);
+  backdrop-filter: blur(4px);
+  overflow: auto;
+}
+
+.studio-modal-panel {
+  width: min(420px, 100%);
+  max-height: min(90vh, 520px);
+  overflow-y: auto;
+  margin: auto 0;
+}
+
+.studio-modal-panel--wide {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 32px);
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.55);
+}
+
+.studio-modal-panel__header {
+  padding: 10px 14px;
+  border-bottom: 1px solid #1e293b;
+  background: #0f172a;
+}
+
+.studio-modal-panel__title {
+  font-size: 15px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.studio-modal-panel__subtitle {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.4;
+}
+
+.studio-modal-panel__body {
+  padding: 12px 14px 14px;
+}
+
+.studio-modal-panel .studio-inline-dialog {
+  margin-bottom: 0;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
+}
+
+.fusion-preview-overlay__hint {
+  margin: 0 0 10px;
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.4;
+}
+
+.fusion-preview-overlay__label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+
+.fusion-preview-overlay__input {
+  width: 100%;
+  max-width: 420px;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #475569;
+  background: #020617;
+  color: #e2e8f0;
+  font-size: 13px;
+}
+
+.fusion-preview-overlay__video {
+  width: 100%;
+  max-height: min(42vh, 360px);
+  border-radius: 8px;
+  background: #000;
+  display: block;
+}
+
+.recording-trim {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #1e293b;
+  background: #0f172a;
+}
+
+.recording-trim__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.recording-trim__title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.recording-trim__meta {
+  font-size: 11px;
+  color: #cbd5e1;
+}
+
+.recording-trim__meta strong {
+  color: #7dd3fc;
+}
+
+.recording-trim__meta-muted {
+  color: #64748b;
+}
+
+.recording-trim__row {
+  display: grid;
+  grid-template-columns: 52px 1fr 44px;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.recording-trim__label {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.recording-trim__range {
+  width: 100%;
+  accent-color: #38bdf8;
+}
+
+.recording-trim__time {
+  font-size: 11px;
+  font-weight: 600;
+  color: #e2e8f0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.recording-trim__hint {
+  margin: 4px 0 0;
+  font-size: 10px;
+  line-height: 1.45;
+  color: #64748b;
+}
+
+.fusion-preview-overlay__fs-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 3;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.5);
+  background: rgba(15, 23, 42, 0.92);
+  color: #e2e8f0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fusion-preview-overlay__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.fusion-preview-overlay__btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fusion-preview-overlay__btn:disabled {
+  opacity: 0.85;
+  cursor: not-allowed;
+}
+
+.fusion-preview-overlay__btn--save-webm {
+  border: 1px solid #047857;
+  background: #065f46;
+  color: #ecfdf5;
+}
+
+.fusion-preview-overlay__btn--save-webm:disabled {
+  background: #334155;
+}
+
+.fusion-preview-overlay__btn--save-mp4 {
+  border: 1px solid #1d4ed8;
+  background: #1e40af;
+  color: #eff6ff;
+}
+
+.fusion-preview-overlay__btn--save-mp4:disabled {
+  background: #334155;
+}
+
+.fusion-preview-overlay__btn--discard {
+  border: 1px solid #475569;
+  background: #1e293b;
+  color: #e2e8f0;
+}
+
+.fusion-preview-overlay__btn--discard:disabled {
+  opacity: 0.6;
+}
+
+.fusion-preview-overlay__progress {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #047857;
+  background: #062018;
+  color: #bbf7d0;
+  font-size: 12px;
+}
+
+.fusion-preview-overlay__progress--mp4 {
+  border-color: #1d4ed8;
+  background: #0b1a3a;
+  color: #dbeafe;
+}
+
+.fusion-preview-overlay__progress-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.fusion-preview-overlay__progress-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.45;
+}
+
+.fusion-preview-overlay__progress-time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 13px;
 }
 
 .fusion-motion-dialog,
@@ -1599,6 +2464,156 @@ button:not(:disabled) {
   left: 4px;
   background: rgba(15, 23, 42, 0.88);
   color: #e2e8f0;
+}
+
+.fusion-motion-chips {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  bottom: 4px;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  max-width: calc(100% - 8px);
+  pointer-events: auto;
+}
+
+.fusion-motion-chip {
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #e0f2fe;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+}
+
+.fusion-motion-chip--gesture {
+  border-color: #0ea5e9;
+  background: #0c4a6e;
+  color: #e0f2fe;
+}
+
+.fusion-motion-chip--sequence {
+  border-color: #7c3aed;
+  background: #4c1d95;
+  color: #ede9fe;
+}
+
+.fusion-motion-chip--custom {
+  border-color: #047857;
+  background: #064e3b;
+  color: #bbf7d0;
+}
+
+.fusion-motion-chip--add {
+  border-style: dashed;
+  border-color: #64748b;
+  background: rgba(15, 23, 42, 0.92);
+  color: #94a3b8;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 18px;
+  padding: 0;
+}
+
+.fusion-motion-chip:hover:not(:disabled) {
+  filter: brightness(1.15);
+}
+
+.fusion-motion-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.fusion-motion-chips__add-wrap {
+  position: relative;
+}
+
+.fusion-motion-chips__picker {
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: #0b1220;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+
+.fusion-motion-chips__picker--portal {
+  position: fixed;
+  z-index: 10050;
+  max-height: min(360px, calc(100vh - 24px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.fusion-motion-chips__picker-section + .fusion-motion-chips__picker-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #1e293b;
+}
+
+.fusion-motion-chips__picker-label {
+  display: block;
+  font-size: 9px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+
+.fusion-motion-chips__picker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+}
+
+.fusion-motion-chips__picker-grid--seq {
+  grid-template-columns: 1fr;
+}
+
+.fusion-program-motion-mode {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 6px;
+  width: 100%;
+}
+
+.fusion-program-motion-mode button {
+  flex: 1;
+  padding: 5px 6px;
+  border-radius: 6px;
+  border: 1px solid #334155;
+  background: #0f172a;
+  color: #94a3b8;
+  font-size: 9px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fusion-program-motion-mode button.fusion-program-motion-mode--active {
+  border-color: #38bdf8;
+  background: #0c4a6e;
+  color: #e0f2fe;
+}
+
+.fusion-program-motion-assign-hint {
+  margin: 0 0 6px;
+  font-size: 9px;
+  line-height: 1.35;
+  color: #64748b;
+}
+
+.fusion-program-motion-assign-hint strong {
+  color: #94a3b8;
 }
 
 .fusion-sidebar {

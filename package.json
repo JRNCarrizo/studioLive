@@ -2,15 +2,25 @@
   "name": "studio-live",
   "version": "0.1.0",
   "description": "Estudio multicámara local (celulares → PC)",
+  "author": "JRNCarrizo",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JRNCarrizo/studioLive.git"
+  },
   "main": "out/main/index.js",
   "type": "module",
   "scripts": {
     "dev": "electron-vite dev",
     "dev:no-gpu": "node scripts/run-dev-no-gpu.mjs",
     "build": "electron-vite build",
-    "preview": "electron-vite preview"
+    "preview": "electron-vite preview",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:publish": "npm run build && electron-builder --win --publish always",
+    "website": "node scripts/serve-download-site.mjs"
   },
   "dependencies": {
+    "electron-updater": "^6.6.2",
     "express": "^4.21.2",
     "ffmpeg-static": "^5.3.0",
     "qrcode.react": "^4.2.0",
@@ -26,9 +36,51 @@
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.3.1",
     "electron-vite": "^2.3.0",
+    "electron-builder": "^25.1.8",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "typescript": "^5.7.2",
     "vite": "^5.4.11"
+  },
+  "build": {
+    "appId": "app.studiolive.desktop",
+    "productName": "Studio Live",
+    "copyright": "Copyright © 2026",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "camera-client",
+        "to": "camera-client"
+      }
+    ],
+    "asarUnpack": [
+      "**/node_modules/ffmpeg-static/**"
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "JRNCarrizo",
+        "repo": "studioLive"
+      }
+    ]
   }
 }

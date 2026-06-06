@@ -95,11 +95,13 @@ La barra superior de la app tiene **tres pestañas**. Cada una usa un **QR disti
 - Layouts de programa (single, 2 lado a lado, PIP, 2×2, 1 grande + 2 chicos).
 - Orientación de salida (horizontal / vertical) según cámaras.
 - **Recorte** y **Zoom** en riel derecho del programa.
+- **Color** — panel flotante: brillo, contraste, saturación y temperatura **por cámara** (layout single).
 - **Mov.** — panel flotante de movimientos de cámara (ver §4).
 - **Fondo** del programa (color o imagen).
 - **Presets de escena** (guardar/aplicar layout + fondo + crossfade).
 - Ecualizador flotante del audio de fusión.
 - Transporte de fusión (play, grabar mezcla, pausa si aplica).
+- **Atajos de teclado** (con pistas/cámaras cargadas): `1`–`9` cámara al aire, `←` `→` anterior/siguiente, `Espacio` play (archivos), `R` grabar.
 - Cerrar sesión cargada (sin borrar archivos del disco).
 
 **Flujo típico:** ISO guardado → pestaña Fusión → cargar WebM → armar programa → grabar o exportar MP4.
@@ -115,6 +117,7 @@ La barra superior de la app tiene **tres pestañas**. Cada una usa un **QR disti
 | Layouts, fondo, recorte, zoom, movimiento | QR propio “Fusión en vivo” |
 | Plan de cámara bajo el programa | Director **manual** o **automático** (rotación de tomas) |
 | Transporte programa | Grabación directa del canvas del programa |
+| Atajos teclado | `1`–`9` y `←` `→` cámara (solo en **manual**); `R` grabar |
 
 **Director automático:** en layout **single**, rota la cámara al aire cada N segundos (round-robin o ponderado). En layouts multi-cámara el automático se desactiva (no aplica).
 
@@ -157,6 +160,19 @@ El encuadre se **interpola** en el dibujo para que el zoom no “salte”. El va
 
 **Recorte → Editar** muestra el marco en el programa. Ajustás esquinas/bordes; **Listo** confirma. El recorte es **por cámara**. Con recorte abierto, los movimientos automáticos están deshabilitados.
 
+### 4.3.1 Ajustes de color (botón ☼ Color)
+
+Panel **flotante** en el riel derecho (layout **single**, una cámara al aire). Cuatro controles deslizantes, **por cámara**:
+
+| Control | Efecto |
+|---------|--------|
+| **Brillo** | Aclara u oscurece la imagen |
+| **Contraste** | Más o menos separación entre luces y sombras |
+| **Saturación** | Intensidad del color (a la izquierda → casi gris) |
+| **Temperatura** | Frío (azul) ↔ cálido (ámbar) |
+
+Los ajustes se ven en el programa y **entran en la grabación/export**. **Reset** vuelve al neutro de esa cámara. Si cambiás de cámara al aire, el panel muestra los valores de la nueva fuente.
+
 ### 4.4 Consola de movimiento (botón 🎮 Mov.)
 
 Panel **flotante** (arrastrable, minimizable). Solo con **una cámara al programa**.
@@ -173,14 +189,28 @@ Panel **flotante** (arrastrable, minimizable). Solo con **una cámara al program
 | Sostener | Detalle → pausa en detalle → neutro |
 | Neutro | Vuelta a tu encuadre base de la pestaña |
 
+**Secuencias** (bloque aparte en el panel; varios pasos encadenados):
+
+| Botón | Efecto resumido |
+|-------|-----------------|
+| Barrido → | Zoom al costado **izquierdo**, recorre hasta la **derecha** (mismo zoom) y vuelve al **neutro** (~7,2 s) |
+| Barrido ← | Igual, empezando por la derecha |
+| Recorrido | Acercar al centro → izquierda → derecha → neutro (~9,5 s) |
+| Barrido ↕ | Zoom arriba, recorre hacia abajo y neutro (~7 s) |
+| Impulso | Detalle rápido al centro y neutro (~2,8 s) |
+| Onda | Detalle con pausa, barrido suave y neutro (~8,5 s) |
+
 **Controles del panel:**
 
 - **Velocidad** — más alto = movimiento más lento.
 - **Intensidad** — cuánto zoom/desplazamiento aplica el preset.
 - **+ Guardar encuadre** — guarda el zoom/pan **actual** como preset propio (sección **Tuyos**).
 - **Detener** — corta una secuencia en curso.
+- **Probar / Programar** — en *Probar*, un clic en un preset lo ejecuta en la cámara al aire; en *Programar*, lo añade al programa de entrada de la cámara objetivo (debajo del título del panel). Doble clic en un preset siempre asigna.
+- **Chips en miniaturas** — cada fuente puede llevar hasta **4** movimientos. El chip muestra la **letra inicial** del preset (mismo color que el botón: gesto, secuencia o tuyo); al pasar el cursor se lee el nombre completo. Clic en el chip lo quita; doble clic lo prueba en esa cámara. El botón **+** abre un menú rápido para añadir.
+- **Al entrar** — cuando una cámara pasa al programa en layout *single* (manual), primero vuelve al neutro y luego ejecuta sus movimientos en orden. En director **automático** no se dispara (evita pelear con el cambio de toma).
 
-Los presets propios y ajustes de velocidad/intensidad se guardan en **localStorage** del equipo (no se sincronizan entre PCs).
+Los presets propios, el programa por cámara y los ajustes de velocidad/intensidad se guardan en **localStorage** del equipo (no se sincronizan entre PCs).
 
 ### 4.5 Fondo del programa
 
@@ -250,6 +280,13 @@ No es un fallo de «Ocultar en captura»: Chrome/Edge dibujan el vídeo con la *
 
 ## 8. Grabación y archivos
 
+### 8.1 Recorte al exportar (inicio y final)
+
+Después de grabar la **mezcla** (Fusión por archivos o Fusión en vivo), en el modal **Grabación terminada** podés ajustar **Inicio** y **Final** con las barras antes de **Guardar WebM** o **Guardar MP4**. Solo se exporta ese tramo (FFmpeg); el archivo en memoria no se modifica hasta guardar. Si dejás inicio en 0 y final al final del video, se guarda todo sin recortar.
+
+Por ahora **no** se puede quitar un pedazo del medio; solo acortar principio y/o final.
+
+
 ### Convención de nombres (ISO)
 
 ```
@@ -279,6 +316,7 @@ La app **no usa** `window.alert` / `prompt` / `confirm` del sistema (Electron no
 |------|--------|
 | Presets de escena propios | `localStorage` |
 | Presets de movimiento propios | `localStorage` |
+| Programa de movimiento por cámara (hasta 4) | `localStorage` |
 | Velocidad / intensidad de movimiento | `localStorage` |
 | Posición de paneles flotantes (EQ, Mov., transporte) | `localStorage` |
 | Alias de cámaras | `localStorage` |

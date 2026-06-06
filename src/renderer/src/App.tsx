@@ -23,7 +23,17 @@ import {
 } from './excludeFromCaptureStorage'
 import { readStoredOutputDir, writeStoredOutputDir } from './outputDirStorage'
 import { QrConnectOverlay } from './QrConnectOverlay'
-import { usePcAudioMix } from './usePcAudioMix'
+import { createPcProcessedStream, usePcAudioMix } from './usePcAudioMix'
+import {
+  describePcAudioError,
+  listPcAudioInputs,
+  openPcAudioCapture,
+  readPcAudioWantsActive,
+  stopMediaStream,
+  waitAfterMicRelease,
+  writePcAudioWantsActive
+} from './pcAudioCapture'
+import { UpdateBanner } from './UpdateBanner'
 import {
   btnAudio,
   btnNeutral,
@@ -146,17 +156,13 @@ function startIsoMediaRecorder(stream: MediaStream, chunks: BlobPart[], optionAt
   throw new Error(lastMsg)
 }
 
-const pcAudioConstraints = {
-  echoCancellation: false,
-  noiseSuppression: false,
-  autoGainControl: false
-} as const
-
-type VideoPresetId = 'high' | 'medium' | 'low'
+type VideoPresetId = 'isoMax' | 'high' | 'medium' | 'low'
 
 /** Bitrate objetivo del WebM ISO en PC (alineado al preset de URL del celular). */
 function isoVideoBitsPerSecondForPreset(preset: VideoPresetId): number {
   switch (preset) {
+    case 'isoMax':
+      return 6_500_000
     case 'high':
       return 4_000_000
     case 'medium':
@@ -178,6 +184,11 @@ const VIDEO_PRESET_OPTIONS: {
   label: string
   hint: string
 }[] = [
+  {
+    id: 'isoMax',
+    label: 'ISO máxima — 1080p ~30 fps',
+    hint: 'Máximo bitrate para 1–2 cámaras; Wi‑Fi 5 GHz cerca del router.'
+  },
   {
     id: 'high',
     label: 'Alta — 1080p ~30 fps',
@@ -224,6 +235,7 @@ export default function App() {
   const [audioInputs, setAudioInputs] = useState<MediaDeviceInfo[]>([])
   const [selectedAudioDeviceId, setSelectedAudioDeviceId] = useState<string>('')
   const [audioStream, setAudioStream] = useState<MediaStream | null>(null)
+  const audioStreamRef = useRef<MediaStream | null>(null)
   const [pcAudioGainPercent, setPcAudioGainPercent] = useState(() => readStoredPcAudioGainPercent())
   const [audioNote, setAudioNote] = useState<string | null>(null)
   const [videoPreset, setVideoPreset] = useState<VideoPresetId>('medium')
@@ -758,48 +770,98 @@ export default function App() {
   }
 
   const refreshAudioDeviceList = useCallback(async () => {
-    if (!navigator.mediaDevices?.enumerateDevices) return
-    const list = await navigator.mediaDevices.enumerateDevices()
-    setAudioInputs(list.filter((d) => d.kind === 'audioinput'))
+    const inputs = await listPcAudioInputs()
+    setAudioInputs(inputs)
   }, [])
 
   const preparePcAudio = useCallback(async () => {
     setAudioNote(null)
+    let deviceLabel: string | undefined
     try {
-      audioStream?.getTracks().forEach((t) => t.stop())
+      stopMediaStream(audioStreamRef.current)
+      setAudioStream(null)
+      await waitAfterMicRelease()
 
-      const audioConstraints: MediaTrackConstraints = {
-        ...pcAudioConstraints,
-        ...(selectedAudioDeviceId ? { deviceId: { exact: selectedAudioDeviceId } } : {})
+      let deviceId = selectedAudioDeviceId
+      const inputs = await listPcAudioInputs()
+      setAudioInputs(inputs)
+      if (deviceId && !inputs.some((d) => d.deviceId === deviceId)) {
+        deviceId = ''
+        setSelectedAudioDeviceId('')
       }
 
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: audioConstraints,
-        video: false
-      })
+      deviceLabel = deviceId
+        ? inputs.find((d) => d.deviceId === deviceId)?.label
+        : 'Predeterminado de Windows'
+
+      const stream = await openPcAudioCapture(deviceId)
       setAudioStream(stream)
+      writePcAudioWantsActive(true)
       await refreshAudioDeviceList()
       setStatus(
-        'Audio de PC activo (opcional). Si no tenés interfaz, igual podés usar solo las cámaras del celular.'
+        'Audio de PC activo. Si YouTube/Spotify dejan de sonar, usá «Soltar mic» hasta grabar (se reabre al pulsar Grabar).'
       )
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e)
       setAudioStream(null)
-      setAudioNote(
-        `No se activó el audio de la PC (${msg}). No pasa nada: las cámaras por HTTPS no dependen de esto.`
-      )
+      setAudioNote(`No se activó el audio de la PC. ${describePcAudioError(e, deviceLabel)}`)
     }
-  }, [audioStream, refreshAudioDeviceList, selectedAudioDeviceId])
+  }, [refreshAudioDeviceList, selectedAudioDeviceId])
+
+  const deactivatePcAudio = useCallback(() => {
+    stopMediaStream(audioStreamRef.current)
+    setAudioStream(null)
+    setAudioNote(null)
+    setStatus(
+      'Mic soltado: YouTube y Spotify pueden sonar otra vez. Al pulsar Grabar, el mic se reabre solo si ya habías usado Activar audio.'
+    )
+  }, [])
+
+  /** Abre el mic si el usuario lo tenía activo antes; devuelve stream post-ganancia para MediaRecorder. */
+  const ensurePcAudioForRecording = useCallback(async (): Promise<MediaStream | null> => {
+    const live = pcRecordingStream?.getAudioTracks().some((t) => t.readyState === 'live')
+    if (live) return pcRecordingStream
+
+    if (!readPcAudioWantsActive()) return null
+
+    let deviceId = selectedAudioDeviceId
+    const inputs = await listPcAudioInputs()
+    if (deviceId && !inputs.some((d) => d.deviceId === deviceId)) deviceId = ''
+
+    const deviceLabel = deviceId
+      ? inputs.find((d) => d.deviceId === deviceId)?.label
+      : 'Predeterminado de Windows'
+
+    try {
+      stopMediaStream(audioStreamRef.current)
+      setAudioStream(null)
+      await waitAfterMicRelease()
+      const raw = await openPcAudioCapture(deviceId)
+      setAudioStream(raw)
+      const mix = createPcProcessedStream(raw, pcAudioGainPercent / 100)
+      return mix?.stream ?? raw
+    } catch (e) {
+      setAudioNote(`Mic no disponible al grabar. ${describePcAudioError(e, deviceLabel)}`)
+      return null
+    }
+  }, [pcAudioGainPercent, pcRecordingStream, selectedAudioDeviceId])
 
   useEffect(() => {
     void refreshAudioDeviceList()
   }, [refreshAudioDeviceList])
 
   useEffect(() => {
-    return () => {
-      audioStream?.getTracks().forEach((t) => t.stop())
-    }
+    if (audioPanelOpen) void refreshAudioDeviceList()
+  }, [audioPanelOpen, refreshAudioDeviceList])
+
+  useEffect(() => {
+    audioStreamRef.current = audioStream
   }, [audioStream])
+
+  useEffect(() => {
+    return () => {
+      stopMediaStream(audioStreamRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     if (!expandedCameraId) return
@@ -1031,6 +1093,8 @@ export default function App() {
     chunksRef.current = new Map()
     recordersRef.current = new Map()
 
+    const pcStreamForRec = await ensurePcAudioForRecording()
+
     let anyTrack = false
 
     try {
@@ -1052,7 +1116,7 @@ export default function App() {
         recordersRef.current.set(id, rec)
       }
 
-      if (pcRecordingStream?.getAudioTracks().length) {
+      if (pcStreamForRec?.getAudioTracks().length) {
         anyTrack = true
         const chunks: BlobPart[] = []
         chunksRef.current.set(PC_AUDIO_RECORDER_KEY, chunks)
@@ -1062,7 +1126,7 @@ export default function App() {
         attempts.push({ audioBitsPerSecond: ISO_AUDIO_BITS_PER_SECOND })
         attempts.push({})
 
-        const rec = startIsoMediaRecorder(pcRecordingStream, chunks, attempts)
+        const rec = startIsoMediaRecorder(pcStreamForRec, chunks, attempts)
         recordersRef.current.set(PC_AUDIO_RECORDER_KEY, rec)
       }
     } catch (e) {
@@ -1101,7 +1165,7 @@ export default function App() {
     setStatus(
       `Grabación en curso: un archivo por cada cámara en vivo + audio de PC si está activo. Detené para escribir los archivos.${displayReminder}`
     )
-  }, [pcRecordingStream, outputDir, pendingIsoSave, streams, videoPreset])
+  }, [ensurePcAudioForRecording, outputDir, pendingIsoSave, streams, videoPreset])
 
   const toggleRecord = async () => {
     try {
@@ -1317,6 +1381,7 @@ export default function App() {
             <span style={{ fontSize: 11, color: '#fbbf24', fontWeight: 600 }}>Sin carpeta</span>
           )}
         </div>
+        <UpdateBanner />
         <span
           style={{
             fontSize: 11,
@@ -1502,6 +1567,7 @@ export default function App() {
           selectedDeviceId={selectedAudioDeviceId}
           onDeviceChange={setSelectedAudioDeviceId}
           onActivate={() => void preparePcAudio()}
+          onDeactivate={deactivatePcAudio}
           audioNote={audioNote}
           rawStream={audioStream}
           analyser={pcMix.analyser}
@@ -1548,6 +1614,7 @@ export default function App() {
 
         <div style={{ display: workspaceMode === 'liveFusion' ? 'block' : 'none' }}>
           <LiveFusionPanel
+            workspaceActive={workspaceMode === 'liveFusion'}
             cameraIds={tileCameraIds}
             streams={streams}
             rtcStates={laneRtcState}
@@ -1561,12 +1628,18 @@ export default function App() {
             onOpenQr={openQrPopover}
             onOpenAudio={openAudioPanel}
             hasPcAudio={Boolean(audioStream)}
+            ensurePcAudioForRecording={ensurePcAudioForRecording}
             onAddDisplayCapture={addDisplayCapture}
           />
         </div>
 
         <div style={{ display: workspaceMode === 'fusion' ? 'block' : 'none' }}>
-          <FusionPanel outputDir={outputDir} liveRecording={isoBusy} onStatus={setStatus} />
+          <FusionPanel
+            outputDir={outputDir}
+            liveRecording={isoBusy}
+            workspaceActive={workspaceMode === 'fusion'}
+            onStatus={setStatus}
+          />
         </div>
       </section>
 

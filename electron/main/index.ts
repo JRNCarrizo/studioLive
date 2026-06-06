@@ -21,8 +21,14 @@ import {
   type SignalingMsg,
   type SignalingRuntime
 } from './signaling'
-import { convertWebmFileToMp4, getFFmpegPath } from './ffmpegConvert'
+import {
+  convertWebmFileToMp4,
+  getFFmpegPath,
+  parseFfmpegTrim,
+  trimWebmFile
+} from './ffmpegConvert'
 import { ensureStudioCerts } from './tls'
+import { bindAutoUpdateWindow, setupAutoUpdater } from './autoUpdate'
 
 /**
  * YouTube / Chrome en captura de pantalla: si el vídeo queda congelado, reiniciá la app con
@@ -123,6 +129,7 @@ function createWindow(): void {
   }
 
   mainWindow.on('closed', () => {
+    bindAutoUpdateWindow(null)
     mainWindow = null
   })
 }
@@ -235,8 +242,22 @@ ipcMain.handle('studio:path-to-file-url', async (_evt, absPath: unknown) => {
 
 ipcMain.handle(
   'studio:save-video',
-  async (_evt, payload: { filePath: string; data: ArrayBuffer }) => {
-    await writeFile(payload.filePath, Buffer.from(payload.data))
+  async (_evt, payload: { filePath: string; data: ArrayBuffer; trim?: unknown }) => {
+    const trim = parseFfmpegTrim(payload?.trim)
+    if (!trim) {
+      await writeFile(payload.filePath, Buffer.from(payload.data))
+      return true
+    }
+    if (!getFFmpegPath()) {
+      throw new Error('FFmpeg no está disponible para recortar el WebM.')
+    }
+    const tmpWebm = path.join(app.getPath('temp'), `studio-trim-in-${randomUUID()}.webm`)
+    await writeFile(tmpWebm, Buffer.from(payload.data))
+    try {
+      await trimWebmFile(tmpWebm, payload.filePath, trim)
+    } finally {
+      await unlink(tmpWebm).catch(() => {})
+    }
     return true
   }
 )
@@ -244,7 +265,7 @@ ipcMain.handle(
 /** WebM en memoria → MP4 H.264/AAC en disco (FFmpeg embebido). */
 ipcMain.handle(
   'studio:save-fusion-mp4',
-  async (_evt, payload: { outputPath: unknown; data: unknown }) => {
+  async (_evt, payload: { outputPath: unknown; data: unknown; trim?: unknown }) => {
     try {
       if (typeof payload?.outputPath !== 'string' || !path.isAbsolute(payload.outputPath)) {
         return { ok: false as const, message: 'Ruta de salida inválida.' }
@@ -259,10 +280,11 @@ ipcMain.handle(
       if (!getFFmpegPath()) {
         return { ok: false as const, message: 'FFmpeg no está disponible en esta plataforma.' }
       }
+      const trim = parseFfmpegTrim(payload.trim)
       const tmpWebm = path.join(app.getPath('temp'), `studio-fusion-${randomUUID()}.webm`)
       await writeFile(tmpWebm, Buffer.from(payload.data))
       try {
-        await convertWebmFileToMp4(tmpWebm, out)
+        await convertWebmFileToMp4(tmpWebm, out, trim)
       } finally {
         await unlink(tmpWebm).catch(() => {})
       }
@@ -403,6 +425,7 @@ ipcMain.handle('studio:export-cert', async () => {
 })
 
 app.whenReady().then(async () => {
+  setupAutoUpdater()
   protocol.handle('studio-webm', async (request) => {
     try {
       const u = new URL(request.url)
@@ -486,9 +509,13 @@ app.whenReady().then(async () => {
   }
 
   createWindow()
+  bindAutoUpdateWindow(mainWindow)
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow()
+      bindAutoUpdateWindow(mainWindow)
+    }
   })
 })
 

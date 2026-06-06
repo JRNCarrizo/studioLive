@@ -88,7 +88,7 @@ function readBool(key: string, fallback: boolean): boolean {
 }
 
 function defaultFloatPos(): { x: number; y: number } {
-  return { x: 12, y: Math.max(8, window.innerHeight - 120) }
+  return { x: 12, y: Math.max(8, window.innerHeight - 96) }
 }
 
 export function FusionStudioTransport(props: FusionStudioTransportProps) {
@@ -179,31 +179,35 @@ export function FusionStudioTransport(props: FusionStudioTransportProps) {
         onMouseDown={floating ? (e) => startDrag(e) : undefined}
         title={floating ? 'Arrastrá para mover' : undefined}
       >
-        <div className="fusion-dock-transport__toolbar-left">
+        <div className="fusion-dock-transport__top">
           <button
             type="button"
-            className={`fusion-dock-transport__chrome-btn${floating ? ' fusion-dock-transport__chrome-btn--on' : ''}`}
+            className={`fusion-dock-transport__chrome-btn fusion-dock-transport__float-btn${floating ? ' fusion-dock-transport__chrome-btn--on' : ''}`}
             onClick={toggleFloating}
             title={floating ? 'Anclar abajo' : 'Desanclar (ventana flotante)'}
           >
             {floating ? GLYPH.floatOn : GLYPH.floatOff}
           </button>
-          <span
-            className={`fusion-dock-transport__lamp${recording && !paused ? ' fusion-dock-transport__lamp--rec' : paused ? ' fusion-dock-transport__lamp--pause' : playing ? ' fusion-dock-transport__lamp--play' : ''}`}
-            aria-hidden
-          />
-          <span className="fusion-dock-transport__tally">{tallyLabel}</span>
-          <span
-            className="fusion-dock-transport__time"
-            title={isFiles ? 'Posición en la línea de tiempo' : 'Tiempo de esta toma'}
-          >
-            {timeLabel}
-          </span>
-          {isIso ? (
-            <span className="fusion-dock-transport__sources" title={props.sourcesLabel}>
-              {props.sourcesLabel}
+          <div className="fusion-dock-transport__head">
+            <div className="fusion-dock-transport__toolbar-left">
+              <span
+                className={`fusion-dock-transport__lamp${recording && !paused ? ' fusion-dock-transport__lamp--rec' : paused ? ' fusion-dock-transport__lamp--pause' : playing ? ' fusion-dock-transport__lamp--play' : ''}`}
+                aria-hidden
+              />
+              <span className="fusion-dock-transport__tally">{tallyLabel}</span>
+            </div>
+            <span
+              className="fusion-dock-transport__time"
+              title={isFiles ? 'Posición en la línea de tiempo' : 'Tiempo de esta toma'}
+            >
+              {timeLabel}
             </span>
-          ) : null}
+            {isIso ? (
+              <span className="fusion-dock-transport__sources" title={props.sourcesLabel}>
+                {props.sourcesLabel}
+              </span>
+            ) : null}
+          </div>
         </div>
 
         <div className="fusion-dock-transport__buttons" role="group" aria-label="Controles">
@@ -249,7 +253,7 @@ export function FusionStudioTransport(props: FusionStudioTransportProps) {
               }
             >
               <span aria-hidden>{GLYPH.record}</span>
-              <span className="fusion-dock-btn__label">Grabar</span>
+              <span className="fusion-dock-btn__label">REC</span>
             </button>
           ) : null}
 

@@ -6,8 +6,77 @@ export type PcAudioMixResult = {
   analyser: AnalyserNode | null
 }
 
+export type PcProcessedGraph = {
+  stream: MediaStream
+  dispose: () => void
+}
+
+function readInputChannelCount(stream: MediaStream): number {
+  const track = stream.getAudioTracks()[0]
+  if (!track) return 1
+  const n = track.getSettings().channelCount
+  return typeof n === 'number' && n >= 2 ? n : 1
+}
+
 /**
- * Cadena: MediaStream → GainNode → MediaStreamDestination (+ Analyser en paralelo).
+ * Mono → duplica L+R (evita oír solo un auricular al reproducir).
+ * Estéreo → pasa directo sin mezclar canales.
+ */
+function connectInputToGain(
+  ctx: AudioContext,
+  src: MediaStreamAudioSourceNode,
+  inputChannels: number,
+  gainNode: GainNode
+): AudioNode[] {
+  const wired: AudioNode[] = []
+  if (inputChannels >= 2) {
+    src.connect(gainNode)
+    wired.push(src)
+    return wired
+  }
+
+  const merger = ctx.createChannelMerger(2)
+  src.connect(merger, 0, 0)
+  src.connect(merger, 0, 1)
+  merger.connect(gainNode)
+  wired.push(src, merger)
+  return wired
+}
+
+/** Grafo one-shot (p. ej. al pulsar Grabar sin mic abierto). */
+export function createPcProcessedStream(
+  rawStream: MediaStream,
+  gainLinear: number
+): PcProcessedGraph | null {
+  const track = rawStream.getAudioTracks()[0]
+  if (!track || track.readyState !== 'live') return null
+
+  const AC =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!AC) return null
+
+  const ctx = new AC()
+  const src = ctx.createMediaStreamSource(rawStream)
+  const gainNode = ctx.createGain()
+  gainNode.gain.value = gainLinear
+  const dest = ctx.createMediaStreamDestination()
+  const wired = connectInputToGain(ctx, src, readInputChannelCount(rawStream), gainNode)
+  gainNode.connect(dest)
+  void ctx.resume()
+
+  return {
+    stream: dest.stream,
+    dispose: () => {
+      wired.forEach((n) => n.disconnect())
+      gainNode.disconnect()
+      void ctx.close()
+    }
+  }
+}
+
+/**
+ * Cadena: MediaStream → (mono→estéreo) → GainNode → MediaStreamDestination (+ Analyser en paralelo).
  * La ganancia se actualiza sin recrear el grafo (solo `gain.value`).
  */
 export function usePcAudioMix(rawStream: MediaStream | null, gainLinear: number): PcAudioMixResult {
@@ -44,7 +113,7 @@ export function usePcAudioMix(rawStream: MediaStream | null, gainLinear: number)
     analyserNode.fftSize = 2048
     analyserNode.smoothingTimeConstant = 0.42
 
-    src.connect(gainNode)
+    const wired = connectInputToGain(ctx, src, readInputChannelCount(rawStream!), gainNode)
     gainNode.connect(dest)
     gainNode.connect(analyserNode)
 
@@ -55,7 +124,7 @@ export function usePcAudioMix(rawStream: MediaStream | null, gainLinear: number)
 
     return () => {
       gainRef.current = null
-      src.disconnect()
+      wired.forEach((n) => n.disconnect())
       gainNode.disconnect()
       analyserNode.disconnect()
       void ctx.close()

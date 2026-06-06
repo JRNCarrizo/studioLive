@@ -13,5 +13,7 @@ export const GLYPH = {
   eq: '\u2630',
   music: '\u266A',
   /** Consola / movimiento de cámara (gamepad). */
-  motion: '\uD83C\uDFAE'
+  motion: '\uD83C\uDFAE',
+  /** Ajustes de imagen (sol). */
+  color: '\u263C'
 } as const

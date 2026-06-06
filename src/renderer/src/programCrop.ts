@@ -1,5 +1,6 @@
-import type { CamFraming } from './programFraming'
-import { clampFraming } from './programFraming'
+import type { CamColorAdjust } from './programColorAdjust'
+import { COLOR_ADJUST_NEUTRAL, colorAdjustToCanvasFilter } from './programColorAdjust'
+import { clampFraming, type CamFraming } from './programFraming'
 import {
   clampNormalizedSlotRect,
   type NormalizedSlotRect,
@@ -482,7 +483,8 @@ export function drawCroppedFramedVideoInRect(
   /** En layout 2×: escala cover según el techo (tamaño máximo), recorte visual por el clip del rect actual. */
   coverScaleRect?: SlotRect | null,
   frameVw?: number,
-  frameVh?: number
+  frameVh?: number,
+  colorAdjust: CamColorAdjust = COLOR_ADJUST_NEUTRAL
 ): void {
   if (v.readyState < 1) return
   const vw = frameVw ?? v.videoWidth
@@ -524,8 +526,11 @@ export function drawCroppedFramedVideoInRect(
   const sy = cy - halfH
 
   const prevAlpha = ctx.globalAlpha
+  const prevFilter = ctx.filter
+  const filter = colorAdjustToCanvasFilter(colorAdjust)
   try {
     ctx.globalAlpha = alpha * prevAlpha
+    if (filter !== 'none') ctx.filter = filter
     if (deg === 0) {
       ctx.drawImage(v, sx, sy, srcW, srcH, ox, oy, dw, dh)
     } else {
@@ -542,6 +547,7 @@ export function drawCroppedFramedVideoInRect(
   } catch {
     /* fotograma aún no decodificado */
   } finally {
+    ctx.filter = prevFilter
     ctx.globalAlpha = prevAlpha
   }
 }

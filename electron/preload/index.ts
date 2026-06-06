@@ -26,13 +26,17 @@ contextBridge.exposeInMainWorld('studio', {
     ipcRenderer.invoke('studio:read-image-data-url', absPath),
   pathToFileUrl: (absPath: string): Promise<string | null> =>
     ipcRenderer.invoke('studio:path-to-file-url', absPath),
-  saveVideo: (filePath: string, data: ArrayBuffer): Promise<boolean> =>
-    ipcRenderer.invoke('studio:save-video', { filePath, data }),
+  saveVideo: (
+    filePath: string,
+    data: ArrayBuffer,
+    trim?: { startSec: number; endSec: number }
+  ): Promise<boolean> => ipcRenderer.invoke('studio:save-video', { filePath, data, trim }),
   saveFusionMp4: (
     outputPath: string,
-    data: ArrayBuffer
+    data: ArrayBuffer,
+    trim?: { startSec: number; endSec: number }
   ): Promise<{ ok: true } | { ok: false; message: string }> =>
-    ipcRenderer.invoke('studio:save-fusion-mp4', { outputPath, data }),
+    ipcRenderer.invoke('studio:save-fusion-mp4', { outputPath, data, trim }),
   prepareRecordingFolder: (
     parentDir: string,
     folderName: string
@@ -57,5 +61,14 @@ contextBridge.exposeInMainWorld('studio', {
       thumbnailDataUrl: string
       kind: 'screen' | 'window'
     }>
-  > => ipcRenderer.invoke('studio:list-display-sources')
+  > => ipcRenderer.invoke('studio:list-display-sources'),
+  getAppVersion: (): Promise<string> => ipcRenderer.invoke('studio:get-app-version'),
+  checkForUpdates: (): Promise<{ ok: true } | { ok: false; reason?: 'dev'; message?: string }> =>
+    ipcRenderer.invoke('studio:check-for-updates'),
+  installUpdate: (): Promise<boolean> => ipcRenderer.invoke('studio:install-update'),
+  onUpdateEvent: (callback: (payload: unknown) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload)
+    ipcRenderer.on('studio:update-event', handler)
+    return () => ipcRenderer.removeListener('studio:update-event', handler)
+  }
 })

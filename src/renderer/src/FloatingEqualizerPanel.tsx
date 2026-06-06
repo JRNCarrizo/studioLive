@@ -7,6 +7,7 @@ import {
   type EqGains,
   type FusionAudioGraph
 } from './useFusionAudioGraph'
+import { GLYPH } from './uiGlyphs'
 
 const POS_STORAGE = 'studioLive.fusionEqPanel.pos.v1'
 const COLLAPSED_STORAGE = 'studioLive.fusionEqPanel.collapsed.v1'
@@ -57,8 +58,9 @@ type Props = {
   fusionRecording: boolean
 }
 
-const CURVE_W = 320
-const CURVE_H = 110
+/** Escala similar al panel flotante de movimiento (~200px de ancho). */
+const CURVE_W = 176
+const CURVE_H = 58
 
 /** Frecuencias de muestreo para la curva: log-escala 20 Hz – 20 kHz. */
 const CURVE_FREQS = (() => {
@@ -123,12 +125,54 @@ function drawCurve(
   ctx.stroke()
 }
 
+/** Botón en el riel del programa (abre el panel flotante de EQ). */
+export function FusionEqTrigger({
+  active,
+  disabled,
+  processing,
+  onClick
+}: {
+  active?: boolean
+  disabled?: boolean
+  /** Alguna banda con ganancia y sin bypass. */
+  processing?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      type="button"
+      className={[
+        'fusion-rail-trigger',
+        'fusion-eq-trigger',
+        active ? 'fusion-rail-trigger--on' : '',
+        processing ? 'fusion-eq-trigger--processing' : ''
+      ]
+        .filter(Boolean)
+        .join(' ')}
+      disabled={disabled}
+      onClick={onClick}
+      title={
+        disabled
+          ? 'Cargá audio-*.webm en la sesión para ecualizar la mezcla.'
+          : 'Ecualizador del audio de la mezcla (afecta la grabación).'
+      }
+      aria-label="Abrir ecualizador"
+      aria-pressed={active}
+    >
+      <span className="fusion-rail-trigger__icon" aria-hidden>
+        {GLYPH.eq}
+      </span>
+      <span className="fusion-rail-trigger__label">EQ</span>
+    </button>
+  )
+}
+
 export function FloatingEqualizerPanel({ open, onClose, graph, fusionRecording }: Props) {
   const storedPos = useRef(readPos())
   const [pos, setPos] = useState(() => {
     const s = storedPos.current
     if (typeof s.x === 'number' && typeof s.y === 'number') return { x: s.x, y: s.y }
-    return { x: window.innerWidth - 400, y: 120 }
+    return { x: Math.max(12, window.innerWidth - 220), y: 96 }
   })
   const [collapsed, setCollapsed] = useState(() => readCollapsed())
   const dragRef = useRef<{ dx: number; dy: number; active: boolean } | null>(null)
@@ -138,8 +182,8 @@ export function FloatingEqualizerPanel({ open, onClose, graph, fusionRecording }
   const clampPos = useCallback((x: number, y: number) => {
     const pad = 8
     const el = rootRef.current
-    const w = el?.offsetWidth ?? 360
-    const h = el?.offsetHeight ?? 320
+    const w = el?.offsetWidth ?? 200
+    const h = el?.offsetHeight ?? 280
     const maxX = Math.max(pad, window.innerWidth - w - pad)
     const maxY = Math.max(pad, window.innerHeight - h - pad)
     return {
@@ -215,79 +259,48 @@ export function FloatingEqualizerPanel({ open, onClose, graph, fusionRecording }
 
   if (!open) return null
 
+  const chromeBtn = {
+    border: '1px solid #334155',
+    background: '#1e293b',
+    color: '#cbd5e1',
+    borderRadius: 6,
+    padding: '2px 7px',
+    cursor: 'pointer',
+    fontSize: 11,
+    lineHeight: 1
+  } as const
+
   if (collapsed) {
     return (
       <div
         ref={rootRef}
+        className="fusion-float-eq fusion-float-eq--collapsed"
         role="dialog"
         aria-label="EQ fusión (minimizado)"
-        style={{
-          position: 'fixed',
-          left: pos.x,
-          top: pos.y,
-          zIndex: 65,
-          width: 200,
-          borderRadius: 12,
-          border: '1px solid #334155',
-          background: '#0b1220',
-          color: '#e2e8f0',
-          fontSize: 12,
-          overflow: 'hidden',
-          boxShadow: '0 10px 28px rgba(0,0,0,0.5)'
-        }}
+        style={{ left: pos.x, top: pos.y }}
       >
-        <div
-          onMouseDown={startDrag}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '6px 8px 6px 10px',
-            background: '#0f172a',
-            cursor: 'grab',
-            userSelect: 'none'
-          }}
-        >
+        <div className="fusion-float-eq__chrome" onMouseDown={startDrag}>
           <button
             type="button"
+            className="fusion-float-eq__chrome-btn"
             onClick={toggleCollapsed}
             aria-label="Expandir"
             title="Expandir"
-            style={{
-              border: 'none',
-              background: 'transparent',
-              color: '#94a3b8',
-              cursor: 'pointer',
-              fontSize: 14,
-              lineHeight: 1,
-              padding: 2
-            }}
           >
             ▾
           </button>
-          <span style={{ fontSize: 11, fontWeight: 700, flex: 1 }}>EQ</span>
+          <span className="fusion-float-eq__title">
+            {GLYPH.eq} EQ
+          </span>
           {eqActive ? (
-            <span style={{ fontSize: 9, fontWeight: 800, color: '#7dd3fc' }}>ACT</span>
+            <span className="fusion-float-eq__badge">ACT</span>
           ) : graph.bypass ? (
-            <span style={{ fontSize: 9, fontWeight: 800, color: '#64748b' }}>BYP</span>
+            <span className="fusion-float-eq__badge" style={{ color: '#64748b' }}>
+              BYP
+            </span>
           ) : null}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Cerrar"
-            title="Cerrar"
-            style={{
-              border: '1px solid #334155',
-              background: '#1e293b',
-              color: '#cbd5e1',
-              borderRadius: 6,
-              padding: '2px 7px',
-              cursor: 'pointer',
-              fontSize: 11,
-              lineHeight: 1
-            }}
-          >
-            ✕
+          <button type="button" style={chromeBtn} onClick={onClose} aria-label="Cerrar" title="Cerrar">
+            {GLYPH.close}
           </button>
         </div>
       </div>
@@ -297,109 +310,53 @@ export function FloatingEqualizerPanel({ open, onClose, graph, fusionRecording }
   return (
     <div
       ref={rootRef}
+      className="fusion-float-eq"
       role="dialog"
       aria-label="EQ fusión"
-      style={{
-        position: 'fixed',
-        left: pos.x,
-        top: pos.y,
-        zIndex: 65,
-        width: 360,
-        maxWidth: 'calc(100vw - 24px)',
-        borderRadius: 12,
-        border: '1px solid #334155',
-        background: '#0b1220',
-        boxShadow: '0 16px 48px rgba(0,0,0,0.55)',
-        color: '#e2e8f0',
-        fontSize: 12
-      }}
+      style={{ left: pos.x, top: pos.y }}
     >
-      <div
-        onMouseDown={startDrag}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 8,
-          padding: '10px 12px',
-          background: '#0f172a',
-          borderBottom: '1px solid #1e293b',
-          cursor: 'grab',
-          userSelect: 'none'
-        }}
-      >
-        <span style={{ fontWeight: 700, fontSize: 13 }}>
-          Ecualizador · audio de fusión {eqActive ? <span style={{ color: '#7dd3fc' }}>· activo</span> : null}
+      <div className="fusion-float-eq__chrome" onMouseDown={startDrag}>
+        <span className="fusion-float-eq__title">
+          {GLYPH.eq} EQ
+          {eqActive ? <span className="fusion-float-eq__badge">activo</span> : null}
         </span>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button
-            type="button"
-            onClick={toggleCollapsed}
-            title="Minimizar"
-            style={{
-              border: '1px solid #334155',
-              background: '#1e293b',
-              color: '#cbd5e1',
-              borderRadius: 6,
-              padding: '4px 8px',
-              cursor: 'pointer',
-              fontSize: 11
-            }}
-          >
-            Minimizar
+        <div className="fusion-float-eq__chrome-actions">
+          <button type="button" style={chromeBtn} onClick={toggleCollapsed} title="Minimizar" aria-label="Minimizar">
+            −
           </button>
           <button
             type="button"
+            style={chromeBtn}
             onClick={onClose}
-            aria-label="Cerrar"
             title="Cerrar (Esc)"
-            style={{
-              border: '1px solid #334155',
-              background: '#1e293b',
-              color: '#cbd5e1',
-              borderRadius: 6,
-              padding: '4px 10px',
-              cursor: 'pointer',
-              fontSize: 13,
-              lineHeight: 1
-            }}
+            aria-label="Cerrar"
           >
-            ✕
+            {GLYPH.close}
           </button>
         </div>
       </div>
 
-      <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.45 }}>
-          5 bandas paramétricas. La curva se aplica al audio y se <strong style={{ color: '#cbd5e1' }}>graba</strong>{' '}
-          al exportar la fusión. Se escucha también mientras reproducís.
+      <div className="fusion-float-eq__body">
+        <p className="fusion-float-eq__hint">
+          5 bandas · se <strong>graba</strong> en la mezcla y se escucha al reproducir.
           {fusionRecording ? (
-            <span style={{ display: 'block', marginTop: 4, color: '#fcd34d' }}>
-              Grabación en curso: los cambios ya están entrando al WebM.
-            </span>
+            <span className="fusion-float-eq__hint-rec"> Grabando: cambios en vivo.</span>
           ) : null}
-        </div>
+        </p>
 
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-          <label htmlFor="eq-preset" style={{ fontSize: 11, color: '#94a3b8' }}>
-            Preset:
+        <div className="fusion-float-eq__toolbar">
+          <label htmlFor="eq-preset" className="fusion-float-eq__preset-label">
+            Preset
           </label>
           <select
             id="eq-preset"
+            className="fusion-float-eq__preset-select"
             onChange={(ev) => {
               const p = EQ_PRESETS.find((x) => x.id === ev.target.value)
               if (p) graph.applyPreset(p.gains)
               ev.currentTarget.value = ''
             }}
             defaultValue=""
-            style={{
-              padding: '4px 8px',
-              borderRadius: 6,
-              border: '1px solid #334155',
-              background: '#0f172a',
-              color: '#e2e8f0',
-              fontSize: 12
-            }}
           >
             <option value="" disabled>
               Elegir preset…
@@ -410,8 +367,7 @@ export function FloatingEqualizerPanel({ open, onClose, graph, fusionRecording }
               </option>
             ))}
           </select>
-          <span style={{ flex: 1 }} />
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: '#94a3b8' }}>
+          <label className="fusion-float-eq__bypass">
             <input
               type="checkbox"
               checked={graph.bypass}
@@ -421,57 +377,19 @@ export function FloatingEqualizerPanel({ open, onClose, graph, fusionRecording }
           </label>
         </div>
 
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'center',
-            padding: 6,
-            borderRadius: 8,
-            border: '1px solid #1e293b',
-            background: '#020617'
-          }}
-        >
-          <canvas
-            ref={curveCanvasRef}
-            style={{
-              width: CURVE_W,
-              height: CURVE_H,
-              display: 'block'
-            }}
-          />
+        <div className="fusion-float-eq__curve-wrap">
+          <canvas ref={curveCanvasRef} className="fusion-float-eq__curve" />
         </div>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: `repeat(${EQ_BAND_COUNT}, 1fr)`,
-            gap: 6
-          }}
-        >
+        <div className="fusion-float-eq__bands">
           {FUSION_EQ_BANDS.map((band, i) => {
             const v = graph.gains[i] ?? 0
             return (
-              <div
-                key={band.label}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  gap: 4,
-                  padding: 4
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 10,
-                    color: '#64748b',
-                    fontVariantNumeric: 'tabular-nums'
-                  }}
-                >
-                  {band.label}
-                </span>
+              <div key={band.label} className="fusion-float-eq__band">
+                <span className="fusion-float-eq__band-label">{band.label}</span>
                 <input
                   type="range"
+                  className="fusion-float-eq__slider"
                   min={-12}
                   max={12}
                   step={0.5}
@@ -480,47 +398,27 @@ export function FloatingEqualizerPanel({ open, onClose, graph, fusionRecording }
                   onChange={(ev) => graph.setBandGain(i, Number(ev.target.value))}
                   onDoubleClick={() => graph.setBandGain(i, 0)}
                   title="Doble clic = 0 dB"
-                  style={{
-                    writingMode: 'vertical-lr' as never,
-                    appearance: 'slider-vertical' as never,
-                    width: 20,
-                    height: 90,
-                    accentColor: '#7dd3fc'
-                  }}
                 />
                 <span
-                  style={{
-                    fontSize: 10,
-                    color: Math.abs(v) > 0.05 ? '#7dd3fc' : '#64748b',
-                    fontVariantNumeric: 'tabular-nums'
-                  }}
+                  className={
+                    'fusion-float-eq__band-db' + (Math.abs(v) > 0.05 ? ' fusion-float-eq__band-db--active' : '')
+                  }
                 >
                   {v > 0 ? '+' : ''}
-                  {v.toFixed(1)} dB
+                  {v.toFixed(1)}
                 </span>
               </div>
             )
           })}
         </div>
 
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button
-            type="button"
-            onClick={() => graph.applyPreset([0, 0, 0, 0, 0] as EqGains)}
-            style={{
-              flex: 1,
-              padding: '6px 8px',
-              borderRadius: 6,
-              border: '1px solid #334155',
-              background: '#0f172a',
-              color: '#cbd5e1',
-              cursor: 'pointer',
-              fontSize: 11
-            }}
-          >
-            Reset (plano)
-          </button>
-        </div>
+        <button
+          type="button"
+          className="fusion-float-eq__reset"
+          onClick={() => graph.applyPreset([0, 0, 0, 0, 0] as EqGains)}
+        >
+          Reset (plano)
+        </button>
       </div>
     </div>
   )

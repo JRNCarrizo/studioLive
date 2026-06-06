@@ -263,6 +263,11 @@
       ensureMediaDevicesShim()
 
       const VIDEO_PRESETS = {
+        isoMax: {
+          width: { min: 1280, ideal: 1920 },
+          height: { min: 720, ideal: 1080 },
+          frameRate: { ideal: 30, min: 24, max: 30 }
+        },
         high: {
           width: { ideal: 1920 },
           height: { ideal: 1080 },
@@ -282,6 +287,7 @@
 
       /** Tope por preset para el codificador WebRTC (reduce tirones por congestión Wi‑Fi con varios celulares). */
       const PRESET_MAX_WEBRTC_BITRATE = {
+        isoMax: 5_500_000,
         high: 3_000_000,
         medium: 1_600_000,
         low: 900_000

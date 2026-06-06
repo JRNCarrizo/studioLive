@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Studio Live — Estudio multicámara local</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <p class="eyebrow">Windows · LAN · Sin nube</p>
+      <h1>Studio Live</h1>
+      <p class="lead">
+        Conectá celulares como cámaras, grabá ISO por pista y armá el programa en tu PC. Todo en red local.
+      </p>
+      <div class="cta">
+        <a id="downloadBtn" class="btn btn-primary" href="#" hidden>Descargar para Windows</a>
+        <p id="downloadMeta" class="meta"></p>
+        <p id="downloadErr" class="err" hidden></p>
+      </div>
+    </header>
+
+    <main>
+      <section class="grid">
+        <article>
+          <h2>Sesión en vivo</h2>
+          <p>Grabación ISO por cámara (<code>cam-*.webm</code>) para editar después.</p>
+        </article>
+        <article>
+          <h2>Fusión por archivos</h2>
+          <p>Cargá las tomas, layouts, zoom y exportá un master WebM o MP4.</p>
+        </article>
+        <article>
+          <h2>Fusión en vivo</h2>
+          <p>Programa multicámara en tiempo real desde los celulares conectados.</p>
+        </article>
+      </section>
+
+      <section class="steps">
+        <h2>Instalación</h2>
+        <ol>
+          <li>Descargá el instalador y ejecutalo (Windows 10 o superior).</li>
+          <li>Si Windows SmartScreen avisa «editor desconocido», elegí «Más información» → «Ejecutar de todos modos».</li>
+          <li>Abrí Studio Live, escaneá el QR con el celular y aceptá el certificado HTTPS la primera vez.</li>
+        </ol>
+      </section>
+
+      <section class="note">
+        <p>
+          Esta página corre en tu PC (<code>127.0.0.1</code>) para probar descargas antes de publicarla en internet.
+          Documentación del proyecto: <code>docs/ESTUDIO_LIVE_GUIA.md</code>.
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <p>Studio Live · v<span id="versionLabel">—</span></p>
+    </footer>
+
+    <script src="main.js"></script>
+  </body>
+</html>

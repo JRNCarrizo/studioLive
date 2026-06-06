@@ -36,8 +36,12 @@ export type FloatingMotionPanelProps = {
   framingNeutral: CamFraming
   getCurrentFraming: () => CamFraming
   onPlay: (presetId: string) => void
+  onAssign: (presetId: string) => void
   onStop: () => void
   onStatus?: (msg: string) => void
+  programMode: boolean
+  onProgramModeChange: (v: boolean) => void
+  assignTargetLabel: string
 }
 
 export function FusionMotionTrigger({
@@ -55,8 +59,9 @@ export function FusionMotionTrigger({
     <button
       type="button"
       className={[
+        'fusion-rail-trigger',
         'fusion-motion-trigger',
-        active ? 'fusion-motion-trigger--on' : '',
+        active ? 'fusion-rail-trigger--on' : '',
         playing ? 'fusion-motion-trigger--playing' : ''
       ]
         .filter(Boolean)
@@ -67,10 +72,10 @@ export function FusionMotionTrigger({
       aria-label="Abrir consola de movimiento"
       aria-pressed={active}
     >
-      <span className="fusion-motion-trigger__icon" aria-hidden>
+      <span className="fusion-rail-trigger__icon" aria-hidden>
         {GLYPH.motion}
       </span>
-      <span className="fusion-motion-trigger__label">Mov.</span>
+      <span className="fusion-rail-trigger__label">Mov.</span>
     </button>
   )
 }
@@ -83,8 +88,12 @@ export function FloatingMotionPanel({
   framingNeutral,
   getCurrentFraming,
   onPlay,
+  onAssign,
   onStop,
-  onStatus
+  onStatus,
+  programMode,
+  onProgramModeChange,
+  assignTargetLabel
 }: FloatingMotionPanelProps) {
   const { pos, rootRef, startDrag } = useFloatingPanelPosition(POS_STORAGE, defaultMotionPos)
   const [collapsed, setCollapsed] = useState(readCollapsed)
@@ -123,12 +132,12 @@ export function FloatingMotionPanel({
           <button type="button" className="fusion-float-motion__chrome-btn" onClick={toggleCollapsed} title="Expandir">
             ▾
           </button>
-          <span className="fusion-float-motion__title">
-            {GLYPH.motion} Mov.
+          <span className="fusion-float-motion__title" title={motionLabel ?? undefined}>
+            <span className="fusion-float-motion__title-base">{GLYPH.motion} Mov.</span>
+            {motionLabel ? (
+              <span className="fusion-float-motion__title-active">· {motionLabel}</span>
+            ) : null}
           </span>
-          {motionLabel ? (
-            <span className="fusion-float-motion__badge">{motionLabel}</span>
-          ) : null}
           <button type="button" style={chromeBtn} onClick={onClose} title="Cerrar">
             {GLYPH.close}
           </button>
@@ -146,12 +155,10 @@ export function FloatingMotionPanel({
       aria-label="Consola de movimiento de cámara"
     >
       <div className="fusion-float-motion__chrome" onMouseDown={startDrag}>
-        <span className="fusion-float-motion__title">
-          {GLYPH.motion} Movimiento
+        <span className="fusion-float-motion__title" title={motionLabel ?? undefined}>
+          <span className="fusion-float-motion__title-base">{GLYPH.motion} Mov.</span>
           {motionLabel ? (
-            <span className="fusion-float-motion__badge fusion-float-motion__badge--inline">
-              {motionLabel}
-            </span>
+            <span className="fusion-float-motion__title-active">· {motionLabel}</span>
           ) : null}
         </span>
         <div className="fusion-float-motion__chrome-actions">
@@ -170,8 +177,12 @@ export function FloatingMotionPanel({
           framingNeutral={framingNeutral}
           getCurrentFraming={getCurrentFraming}
           onPlay={onPlay}
+          onAssign={onAssign}
           onStop={onStop}
           onStatus={onStatus}
+          programMode={programMode}
+          onProgramModeChange={onProgramModeChange}
+          assignTargetLabel={assignTargetLabel}
           embedded
         />
       </div>

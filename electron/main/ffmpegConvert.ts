@@ -5,6 +5,29 @@ import path from 'node:path'
 const require = createRequire(import.meta.url)
 const ffmpegBin = require('ffmpeg-static') as string | undefined | null
 
+export type FfmpegTrimRange = {
+  startSec: number
+  endSec: number
+}
+
+const MIN_TRIM_DURATION_SEC = 0.5
+
+export function parseFfmpegTrim(raw: unknown): FfmpegTrimRange | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const o = raw as { startSec?: unknown; endSec?: unknown }
+  const startSec = Number(o.startSec)
+  const endSec = Number(o.endSec)
+  if (!Number.isFinite(startSec) || !Number.isFinite(endSec)) return undefined
+  if (endSec - startSec < MIN_TRIM_DURATION_SEC) return undefined
+  if (startSec < 0) return undefined
+  return { startSec, endSec }
+}
+
+function trimFilterArgs(trim?: FfmpegTrimRange): string[] {
+  if (!trim) return []
+  return ['-ss', String(trim.startSec), '-to', String(trim.endSec)]
+}
+
 function runFfmpeg(args: string[]): Promise<{ code: number; stderr: string }> {
   const ffmpegPath = ffmpegBin ?? ''
   return new Promise((resolve, reject) => {
@@ -35,8 +58,67 @@ function stderrIndicatesNoAudioStream(stderr: string): boolean {
   return false
 }
 
+/** Recorta WebM (inicio/fin) con copia de streams; si falla, re-codifica VP8/Opus. */
+export async function trimWebmFile(
+  inputWebm: string,
+  outputWebm: string,
+  trim: FfmpegTrimRange
+): Promise<void> {
+  const normOut = path.normalize(outputWebm)
+  const cut = trimFilterArgs(trim)
+
+  const attemptCopy = [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-y',
+    '-i',
+    inputWebm,
+    ...cut,
+    '-c',
+    'copy',
+    '-avoid_negative_ts',
+    'make_zero',
+    normOut
+  ]
+
+  let r = await runFfmpeg(attemptCopy)
+  if (r.code === 0) return
+
+  const attemptEncode = [
+    '-hide_banner',
+    '-loglevel',
+    'error',
+    '-y',
+    '-i',
+    inputWebm,
+    ...cut,
+    '-c:v',
+    'libvpx',
+    '-crf',
+    '12',
+    '-b:v',
+    '0',
+    '-c:a',
+    'libopus',
+    '-b:a',
+    '128k',
+    normOut
+  ]
+
+  r = await runFfmpeg(attemptEncode)
+  if (r.code === 0) return
+
+  const hint = r.stderr.trim() ? `\n${r.stderr.trim().slice(-4000)}` : ''
+  throw new Error(`FFmpeg no pudo recortar el WebM (código ${r.code}).${hint}`)
+}
+
 /** WebM (fusión) → MP4 H.264 + AAC, compatible con el Reproductor de Windows. */
-export async function convertWebmFileToMp4(inputWebm: string, outputMp4: string): Promise<void> {
+export async function convertWebmFileToMp4(
+  inputWebm: string,
+  outputMp4: string,
+  trim?: FfmpegTrimRange
+): Promise<void> {
   const normOut = path.normalize(outputMp4)
   if (!normOut.toLowerCase().endsWith('.mp4')) {
     throw new Error('La salida debe ser un archivo .mp4.')
@@ -61,6 +143,8 @@ export async function convertWebmFileToMp4(inputWebm: string, outputMp4: string)
    * Antes se hacía fallback a solo-vídeo ante *cualquier* error del paso 1 → MP4 “exitoso” pero mudo.
    * Ahora solo-vídeo si el stderr indica claramente que no hay audio.
    */
+  const cut = trimFilterArgs(trim)
+
   const attemptAutoMap = [
     '-hide_banner',
     '-loglevel',
@@ -68,6 +152,7 @@ export async function convertWebmFileToMp4(inputWebm: string, outputMp4: string)
     '-y',
     '-i',
     inputWebm,
+    ...cut,
     ...baseVideo,
     ...baseAudio,
     normOut
@@ -85,6 +170,7 @@ export async function convertWebmFileToMp4(inputWebm: string, outputMp4: string)
     '-y',
     '-i',
     inputWebm,
+    ...cut,
     '-map',
     '0:v:0',
     '-map',
@@ -114,6 +200,7 @@ export async function convertWebmFileToMp4(inputWebm: string, outputMp4: string)
     '-y',
     '-i',
     inputWebm,
+    ...cut,
     '-map',
     '0:v:0',
     ...baseVideo,
