@@ -31,6 +31,7 @@ export function UpdateBanner() {
           break
         case 'not-available':
           setPhase('idle')
+          setError(null)
           break
         case 'downloading':
           setPhase('downloading')

@@ -38,6 +38,8 @@ La app instalada busca updates en **GitHub Releases** del repo `JRNCarrizo/studi
 
 **Manual (sin Actions):** creá un Release en GitHub y ejecutá `npm run dist:publish` con un token `GH_TOKEN` con permiso `repo`.
 
+**Importante para auto-update:** el Release debe incluir **`latest.yml`**, el **`.exe`** y el **`.blockmap`**. Si solo subís el instalador a mano, el botón de versión fallará (error 404/406). Tras `npm run dist:win`, esos archivos están en `release/`. El `.exe` debe llamarse **`Studio-Live-Setup-0.1.0.exe`** (igual que en `latest.yml`).
+
 ## Documentación
 
 | Documento | Descripción |

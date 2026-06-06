@@ -20,6 +20,23 @@ function sendUpdateEvent(payload: UpdateEventPayload): void {
   mainWindow?.webContents.send('studio:update-event', payload)
 }
 
+function friendlyUpdateError(raw: string): string {
+  const lower = raw.toLowerCase()
+  if (
+    lower.includes('404') ||
+    lower.includes('406') ||
+    lower.includes('latest.yml') ||
+    lower.includes('cannot find') ||
+    lower.includes('no published versions')
+  ) {
+    return [
+      'No se encontró un Release válido en GitHub (falta latest.yml o el tag v0.x.x).',
+      'Publicá el Release con npm run dist:publish o subí latest.yml + el .exe al Release.'
+    ].join(' ')
+  }
+  return raw
+}
+
 /** electron-updater es CJS; import ESM falla en el .exe empaquetado. */
 function loadAutoUpdater(): AppUpdater | null {
   try {
@@ -71,7 +88,7 @@ export function setupAutoUpdater(): void {
     sendUpdateEvent({ phase: 'ready', version: info.version })
   })
   autoUpdater.on('error', (err) => {
-    sendUpdateEvent({ phase: 'error', message: err.message })
+    sendUpdateEvent({ phase: 'error', message: friendlyUpdateError(err.message) })
   })
 
   ipcMain.handle('studio:check-for-updates', async () => {
@@ -79,7 +96,7 @@ export function setupAutoUpdater(): void {
       await autoUpdater.checkForUpdates()
       return { ok: true as const }
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
+      const message = friendlyUpdateError(e instanceof Error ? e.message : String(e))
       sendUpdateEvent({ phase: 'error', message })
       return { ok: false as const, message }
     }
@@ -93,7 +110,8 @@ export function setupAutoUpdater(): void {
   /** No bloquear el arranque (signaling + UI primero). */
   setTimeout(() => {
     void autoUpdater.checkForUpdates().catch((e) => {
-      const message = e instanceof Error ? e.message : String(e)
+      const message = friendlyUpdateError(e instanceof Error ? e.message : String(e))
+      console.warn('[studio-update]', message)
       sendUpdateEvent({ phase: 'error', message })
     })
   }, 8000)
