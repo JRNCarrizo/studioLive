@@ -615,18 +615,6 @@ code {
   padding: 0 0 72px;
 }
 
-.req-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-}
-
-@media (max-width: 640px) {
-  .req-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
 .requirements h2 {
   margin: 0 0 16px;
   font-size: 1.25rem;
@@ -642,24 +630,6 @@ code {
 
 .requirements li + li {
   margin-top: 8px;
-}
-
-.note-card {
-  padding: 24px;
-  background: rgba(99, 102, 241, 0.08);
-  border: 1px solid rgba(99, 102, 241, 0.2);
-  border-radius: var(--radius);
-}
-
-.note-card p {
-  margin: 0;
-  font-size: 0.875rem;
-  color: var(--muted);
-  line-height: 1.6;
-}
-
-.note-card strong {
-  color: var(--text);
 }
 
 /* Footer */
