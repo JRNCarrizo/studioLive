@@ -50,7 +50,11 @@
             </p>
 
             <div class="hero-actions">
-              <button type="button" id="downloadBtn" class="btn btn-primary" hidden>
+              <a
+                id="downloadBtn"
+                class="btn btn-primary"
+                href="https://github.com/JRNCarrizo/studioLive/releases/download/v0.1.0/Studio-Live-Setup-0.1.0.exe"
+              >
                 <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <path
                     d="M12 3v12m0 0l4-4m-4 4L8 11M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
@@ -61,11 +65,23 @@
                   />
                 </svg>
                 Descargar para Windows
-              </button>
-              <p id="downloadMeta" class="download-meta"></p>
-              <p id="downloadFallback" class="download-fallback" hidden>
-                La descarga debería empezar abajo a la derecha del navegador. Si no arranca,
-                <a id="downloadManual" href="#" hidden>usá este enlace directo</a>.
+              </a>
+              <a
+                id="downloadAlt"
+                class="btn btn-secondary"
+                href="https://github.com/JRNCarrizo/studioLive/releases/latest"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Ver en GitHub (si no inicia solo)
+              </a>
+              <p id="downloadMeta" class="download-meta">
+                Studio-Live-Setup-0.1.0.exe · ~100 MB
+              </p>
+              <p class="download-help">
+                Al hacer clic puede verse una pantalla en blanco unos segundos: es normal.
+                Revisá el <strong>icono de descargas</strong> del navegador (arriba a la derecha).
+                Abrí la página en <strong>Chrome o Edge</strong>, no en la vista previa del editor.
               </p>
               <p id="downloadErr" class="download-err" hidden></p>
             </div>
