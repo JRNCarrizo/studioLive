@@ -1,5 +1,6 @@
 const REPO = 'JRNCarrizo/studioLive'
-const DOWNLOAD_PATH = '/download'
+const FALLBACK_EXE =
+  'https://github.com/JRNCarrizo/studioLive/releases/download/v0.1.0/Studio-Live-Setup-0.1.0.exe'
 
 function parseVersion(fileName) {
   const m =
@@ -20,28 +21,41 @@ function isEmbeddedPreview() {
   }
 }
 
-function showDownload({ fileName, sizeLabel, version, directUrl }) {
+/** Descarga sin abrir pestañas (iframe oculto). */
+function triggerDownload(url) {
+  if (isEmbeddedPreview()) {
+    window.open(url, '_blank', 'noopener,noreferrer')
+    return
+  }
+
+  const iframe = document.createElement('iframe')
+  iframe.setAttribute('aria-hidden', 'true')
+  iframe.style.cssText = 'position:absolute;width:0;height:0;border:0;visibility:hidden'
+  iframe.src = url
+  document.body.appendChild(iframe)
+  window.setTimeout(() => iframe.remove(), 120000)
+}
+
+function showDownload({ fileName, sizeLabel, version, downloadUrl }) {
   const btn = document.getElementById('downloadBtn')
   const meta = document.getElementById('downloadMeta')
   const fallback = document.getElementById('downloadFallback')
+  const manual = document.getElementById('downloadManual')
   const versionLabel = document.getElementById('versionLabel')
 
-  const downloadHref = directUrl || new URL(DOWNLOAD_PATH, window.location.origin).href
-
   btn.hidden = false
-  btn.href = downloadHref
-  // Nueva pestaña = contexto no sandboxeado (Cursor preview, iframes, etc.).
-  btn.target = '_blank'
-  btn.rel = 'noopener noreferrer'
-  btn.removeAttribute('download')
+  btn.onclick = () => triggerDownload(downloadUrl)
 
   fallback.hidden = false
-  if (isEmbeddedPreview()) {
-    fallback.innerHTML =
-      'Estás en una vista previa embebida: usá <strong>clic derecho → Abrir enlace en nueva pestaña</strong> o abrí esta web en Chrome/Edge.'
-  } else {
-    fallback.textContent =
-      'Se abre una pestaña nueva y empieza la descarga. Revisá Descargas si no la ves.'
+  manual.hidden = false
+  manual.href = downloadUrl
+  manual.onclick = (e) => {
+    e.preventDefault()
+    if (isEmbeddedPreview()) {
+      window.open(downloadUrl, '_blank', 'noopener,noreferrer')
+      return
+    }
+    window.location.assign(downloadUrl)
   }
 
   meta.textContent = sizeLabel ? `${fileName} · ${sizeLabel}` : fileName
@@ -65,7 +79,7 @@ async function loadFromLocalServer() {
     fileName: data.fileName,
     sizeLabel: data.sizeLabel,
     version: parseVersion(data.fileName),
-    directUrl: new URL('/download', window.location.origin).href
+    downloadUrl: new URL('/download', window.location.origin).href
   })
 }
 
@@ -77,20 +91,20 @@ async function loadFromGitHubMeta() {
     if (!r.ok) throw new Error('no release')
     const release = await r.json()
     const asset = (release.assets ?? []).find((a) => /\.exe$/i.test(a.name))
-    if (!asset) throw new Error('no exe')
+    if (!asset?.browser_download_url) throw new Error('no exe')
     const sizeMb = asset.size / (1024 * 1024)
     showDownload({
       fileName: asset.name,
       sizeLabel: `${sizeMb.toFixed(1)} MB`,
       version: String(release.tag_name ?? '').replace(/^v/i, '') || parseVersion(asset.name),
-      directUrl: new URL(DOWNLOAD_PATH, window.location.origin).href
+      downloadUrl: asset.browser_download_url
     })
   } catch {
     showDownload({
       fileName: 'Studio-Live-Setup-0.1.0.exe',
       sizeLabel: null,
       version: '0.1.0',
-      directUrl: new URL(DOWNLOAD_PATH, window.location.origin).href
+      downloadUrl: FALLBACK_EXE
     })
   }
 }

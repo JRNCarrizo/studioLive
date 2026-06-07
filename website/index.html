@@ -50,14 +50,7 @@
             </p>
 
             <div class="hero-actions">
-              <a
-                id="downloadBtn"
-                class="btn btn-primary"
-                href="/download"
-                target="_blank"
-                rel="noopener noreferrer"
-                hidden
-              >
+              <button type="button" id="downloadBtn" class="btn btn-primary" hidden>
                 <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                   <path
                     d="M12 3v12m0 0l4-4m-4 4L8 11M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
@@ -68,11 +61,11 @@
                   />
                 </svg>
                 Descargar para Windows
-              </a>
+              </button>
               <p id="downloadMeta" class="download-meta"></p>
               <p id="downloadFallback" class="download-fallback" hidden>
-                La descarga debería empezar al instante. Si no, revisá la carpeta
-                <strong>Descargas</strong> o el icono de descargas del navegador.
+                La descarga debería empezar abajo a la derecha del navegador. Si no arranca,
+                <a id="downloadManual" href="#" hidden>usá este enlace directo</a>.
               </p>
               <p id="downloadErr" class="download-err" hidden></p>
             </div>
