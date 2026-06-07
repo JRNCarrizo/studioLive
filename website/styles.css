@@ -261,6 +261,30 @@ body {
   color: var(--muted);
 }
 
+.download-fallback {
+  margin: 10px 0 0;
+  font-size: 0.8125rem;
+  color: var(--muted);
+  line-height: 1.5;
+  max-width: 42ch;
+}
+
+.download-fallback a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.download-fallback a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 860px) {
+  .download-fallback {
+    margin-inline: auto;
+  }
+}
+
 .download-err {
   margin: 14px 0 0;
   font-size: 0.875rem;

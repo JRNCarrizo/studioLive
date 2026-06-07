@@ -1,9 +1,11 @@
-/** Fallback si la API de GitHub falla (rate limit, red, etc.). */
+const REPO = 'JRNCarrizo/studioLive'
+const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`
+
+/** Fallback si la API de GitHub falla. */
 const RELEASE_FALLBACK = {
   version: '0.1.0',
   fileName: 'Studio-Live-Setup-0.1.0.exe',
-  downloadUrl:
-    'https://github.com/JRNCarrizo/studioLive/releases/download/v0.1.0/Studio-Live-Setup-0.1.0.exe'
+  releasesPage: RELEASES_PAGE
 }
 
 function parseVersion(fileName) {
@@ -17,26 +19,45 @@ function isLocalDev() {
   return h === '127.0.0.1' || h === 'localhost'
 }
 
-function showDownload({ href, fileName, sizeLabel, version, external = false }) {
-  const btn = document.getElementById('downloadBtn')
-  const meta = document.getElementById('downloadMeta')
-  const versionLabel = document.getElementById('versionLabel')
+function wireDownloadButton(btn, { href, external }) {
+  btn.replaceWith(btn.cloneNode(true))
+  const fresh = document.getElementById('downloadBtn')
 
-  btn.hidden = false
-  btn.href = href
-  btn.removeAttribute('target')
-  btn.removeAttribute('rel')
-  btn.removeAttribute('download')
-
-  if (external) {
-    // GitHub sirve el .exe con Content-Disposition; target=_blank deja una pestaña en blanco.
-    btn.setAttribute('rel', 'noopener')
-  } else {
-    btn.setAttribute('download', fileName)
+  if (!external) {
+    fresh.href = href
+    fresh.removeAttribute('target')
+    fresh.removeAttribute('rel')
+    return fresh
   }
 
-  const sizePart = sizeLabel ? `${fileName} · ${sizeLabel}` : fileName
-  meta.textContent = external ? `${sizePart} · descarga desde GitHub` : sizePart
+  fresh.href = href
+  fresh.setAttribute('target', '_blank')
+  fresh.setAttribute('rel', 'noopener noreferrer')
+  return fresh
+}
+
+function showDownload({ href, fileName, sizeLabel, version, external = false, releasesPage }) {
+  const meta = document.getElementById('downloadMeta')
+  const fallback = document.getElementById('downloadFallback')
+  const versionLabel = document.getElementById('versionLabel')
+  const btn = wireDownloadButton(document.getElementById('downloadBtn'), { href, external })
+
+  btn.hidden = false
+
+  if (external) {
+    const page = releasesPage ?? RELEASES_PAGE
+    fallback.hidden = false
+    fallback.querySelector('a').href = page
+    const fileEl = fallback.querySelector('[data-download-file]')
+    if (fileEl) fileEl.textContent = fileName
+    meta.textContent = sizeLabel
+      ? `${fileName} · ${sizeLabel} · se abre GitHub en otra pestaña`
+      : `${fileName} · se abre GitHub en otra pestaña`
+  } else {
+    fallback.hidden = true
+    meta.textContent = sizeLabel ? `${fileName} · ${sizeLabel}` : fileName
+  }
+
   versionLabel.textContent = version ?? parseVersion(fileName)
 }
 
@@ -64,19 +85,19 @@ async function loadFromLocalServer() {
 
 function applyFallbackDownload() {
   showDownload({
-    href: RELEASE_FALLBACK.downloadUrl,
+    href: RELEASES_PAGE,
     fileName: RELEASE_FALLBACK.fileName,
     sizeLabel: null,
     version: RELEASE_FALLBACK.version,
-    external: true
+    external: true,
+    releasesPage: RELEASES_PAGE
   })
 }
 
-/** Netlify y cualquier hosting estático: último Release publicado en GitHub. */
+/** Netlify: abrir la release en GitHub (descarga fiable del .exe en Assets). */
 async function loadFromGitHubRelease() {
-  const repo = 'JRNCarrizo/studioLive'
   try {
-    const r = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, {
       headers: { Accept: 'application/vnd.github+json' }
     })
     if (!r.ok) {
@@ -90,12 +111,15 @@ async function loadFromGitHubRelease() {
       return
     }
     const sizeMb = asset.size / (1024 * 1024)
+    const releasesPage = release.html_url ?? RELEASES_PAGE
+
     showDownload({
-      href: asset.browser_download_url,
+      href: releasesPage,
       fileName: asset.name,
       sizeLabel: `${sizeMb.toFixed(1)} MB`,
       version: String(release.tag_name ?? '').replace(/^v/i, '') || parseVersion(asset.name),
-      external: true
+      external: true,
+      releasesPage
     })
   } catch {
     applyFallbackDownload()
