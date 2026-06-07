@@ -1,5 +1,13 @@
 [build]
   publish = "website"
+  functions = "netlify/functions"
+
+# Descarga directa desde tu dominio → redirige al .exe del último Release (sin UI de GitHub).
+[[redirects]]
+  from = "/download"
+  to = "/.netlify/functions/download"
+  status = 200
+  force = true
 
 [[headers]]
   for = "/*"
