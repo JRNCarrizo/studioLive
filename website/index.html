@@ -53,7 +53,7 @@
               <a
                 id="downloadBtn"
                 class="btn btn-primary"
-                href="https://github.com/JRNCarrizo/studioLive/releases/download/v0.1.0/Studio-Live-Setup-0.1.0.exe"
+                href="https://github.com/JRNCarrizo/studioLive/releases/latest"
                 target="_blank"
                 rel="noopener noreferrer"
               >
@@ -66,24 +66,29 @@
                     stroke-linejoin="round"
                   />
                 </svg>
-                Descargar para Windows
+                Descargar en GitHub
               </a>
-              <a
-                id="downloadAlt"
-                class="btn btn-secondary"
-                href="https://github.com/JRNCarrizo/studioLive/releases/latest"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                Ver en GitHub (si no inicia solo)
-              </a>
+              <button id="copyDownloadLink" type="button" class="btn btn-secondary">
+                Copiar enlace del instalador
+              </button>
               <p id="downloadMeta" class="download-meta">
                 Studio-Live-Setup-0.1.0.exe · ~100 MB
               </p>
+              <p id="downloadStatus" class="download-status" hidden></p>
+              <ol class="download-steps">
+                <li>Se abre la página de GitHub (no una pantalla en blanco).</li>
+                <li>
+                  En <strong>Assets</strong>, clic en
+                  <strong id="downloadAssetName">Studio-Live-Setup-0.1.0.exe</strong>.
+                </li>
+                <li>
+                  Si no baja solo: <strong>clic derecho</strong> en ese archivo →
+                  <strong>Guardar enlace como…</strong> (o «Abrir en nueva pestaña»).
+                </li>
+                <li>Revisá descargas con <strong>Ctrl+J</strong> (~100 MB, 1–3 min).</li>
+              </ol>
               <p class="download-help">
-                El botón abre una pestaña nueva y la descarga arranca ahí (puede verse en blanco unos
-                segundos: es normal). Revisá el <strong>icono de descargas</strong> del navegador.
-                Usá <strong>Chrome o Edge</strong>, no la vista previa del editor.
+                Usá <strong>Chrome o Edge</strong> real, no la vista previa del editor.
               </p>
               <p id="downloadErr" class="download-err" hidden></p>
             </div>

@@ -3,8 +3,10 @@ const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`
 const FALLBACK = {
   version: '0.1.0',
   fileName: 'Studio-Live-Setup-0.1.0.exe',
-  url: `https://github.com/${REPO}/releases/download/v0.1.0/Studio-Live-Setup-0.1.0.exe`
+  directUrl: `https://github.com/${REPO}/releases/download/v0.1.0/Studio-Live-Setup-0.1.0.exe`
 }
+
+let currentDownload = { ...FALLBACK }
 
 function parseVersion(fileName) {
   const m =
@@ -21,17 +23,42 @@ function formatMb(bytes) {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function applyDownloadLinks({ url, fileName, sizeLabel, version }) {
+function showCopyFeedback() {
+  const status = document.getElementById('downloadStatus')
+  status.hidden = false
+  status.textContent =
+    'Enlace copiado. Pegalo en Chrome o Edge y Enter, o clic derecho en el .exe en GitHub → Guardar enlace como…'
+  window.setTimeout(() => {
+    status.hidden = true
+  }, 8000)
+}
+
+async function copyDirectLink() {
+  const url = currentDownload.directUrl
+  try {
+    await navigator.clipboard.writeText(url)
+    showCopyFeedback()
+  } catch {
+    window.prompt('Copiá este enlace y pegalo en Chrome o Edge:', url)
+  }
+}
+
+function setupDownloadActions() {
+  document.getElementById('copyDownloadLink').addEventListener('click', () => {
+    void copyDirectLink()
+  })
+}
+
+function applyDownloadLinks({ directUrl, fileName, sizeLabel, version }) {
   const btn = document.getElementById('downloadBtn')
-  const alt = document.getElementById('downloadAlt')
   const meta = document.getElementById('downloadMeta')
+  const assetName = document.getElementById('downloadAssetName')
   const versionLabel = document.getElementById('versionLabel')
 
-  btn.href = url
-  btn.target = '_blank'
-  btn.rel = 'noopener noreferrer'
-  alt.href = RELEASES_PAGE
+  currentDownload = { directUrl, fileName }
+  btn.href = RELEASES_PAGE
   meta.textContent = sizeLabel ? `${fileName} · ${sizeLabel}` : fileName
+  assetName.textContent = fileName
   versionLabel.textContent = version ?? parseVersion(fileName)
 }
 
@@ -44,11 +71,13 @@ async function loadFromLocalServer() {
     return
   }
   applyDownloadLinks({
-    url: '/download',
+    directUrl: `${location.origin}/download`,
     fileName: data.fileName,
     sizeLabel: data.sizeLabel,
     version: parseVersion(data.fileName)
   })
+  document.getElementById('downloadBtn').href = '/download'
+  document.getElementById('downloadBtn').removeAttribute('target')
 }
 
 async function loadFromGitHub() {
@@ -61,7 +90,7 @@ async function loadFromGitHub() {
     const asset = (release.assets ?? []).find((a) => /\.exe$/i.test(a.name))
     if (!asset?.browser_download_url) throw new Error('no exe')
     applyDownloadLinks({
-      url: asset.browser_download_url,
+      directUrl: asset.browser_download_url,
       fileName: asset.name,
       sizeLabel: formatMb(asset.size),
       version: String(release.tag_name ?? '').replace(/^v/i, '')
@@ -71,5 +100,6 @@ async function loadFromGitHub() {
   }
 }
 
+setupDownloadActions()
 if (isLocalDev()) loadFromLocalServer()
 else loadFromGitHub()
