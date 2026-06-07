@@ -46,10 +46,21 @@ app.get('/api/installer', (_req, res) => {
   res.json({
     ok: true,
     fileName: latest.name,
-    downloadUrl: `/downloads/${encodeURIComponent(latest.name)}`,
+    downloadUrl: '/download',
     sizeLabel: formatBytes(latest.size),
     builtAt: new Date(latest.mtimeMs).toISOString()
   })
+})
+
+/** Misma ruta que en Netlify: descarga directa del instalador local. */
+app.get('/download', (_req, res) => {
+  const list = listWindowsInstallers()
+  if (!list.length) {
+    res.status(404).send('No hay instalador en release/. Ejecutá npm run dist:win.')
+    return
+  }
+  const latest = list[0]
+  res.download(latest.abs, latest.name)
 })
 
 app.use('/downloads', express.static(releaseDir, { index: false, fallthrough: false }))

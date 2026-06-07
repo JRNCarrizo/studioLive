@@ -6,8 +6,7 @@
 [[redirects]]
   from = "/download"
   to = "/.netlify/functions/download"
-  status = 200
-  force = true
+  status = 302
 
 [[headers]]
   for = "/*"

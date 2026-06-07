@@ -12,19 +12,38 @@ function isLocalDev() {
   return h === '127.0.0.1' || h === 'localhost'
 }
 
-function showDownload({ fileName, sizeLabel, version }) {
+function isEmbeddedPreview() {
+  try {
+    return window.self !== window.top
+  } catch {
+    return true
+  }
+}
+
+function showDownload({ fileName, sizeLabel, version, directUrl }) {
   const btn = document.getElementById('downloadBtn')
   const meta = document.getElementById('downloadMeta')
   const fallback = document.getElementById('downloadFallback')
   const versionLabel = document.getElementById('versionLabel')
 
+  const downloadHref = directUrl || new URL(DOWNLOAD_PATH, window.location.origin).href
+
   btn.hidden = false
-  btn.href = DOWNLOAD_PATH
-  btn.removeAttribute('target')
-  btn.removeAttribute('rel')
+  btn.href = downloadHref
+  // Nueva pestaña = contexto no sandboxeado (Cursor preview, iframes, etc.).
+  btn.target = '_blank'
+  btn.rel = 'noopener noreferrer'
   btn.removeAttribute('download')
 
   fallback.hidden = false
+  if (isEmbeddedPreview()) {
+    fallback.innerHTML =
+      'Estás en una vista previa embebida: usá <strong>clic derecho → Abrir enlace en nueva pestaña</strong> o abrí esta web en Chrome/Edge.'
+  } else {
+    fallback.textContent =
+      'Se abre una pestaña nueva y empieza la descarga. Revisá Descargas si no la ves.'
+  }
+
   meta.textContent = sizeLabel ? `${fileName} · ${sizeLabel}` : fileName
   versionLabel.textContent = version ?? parseVersion(fileName)
 }
@@ -45,7 +64,8 @@ async function loadFromLocalServer() {
   showDownload({
     fileName: data.fileName,
     sizeLabel: data.sizeLabel,
-    version: parseVersion(data.fileName)
+    version: parseVersion(data.fileName),
+    directUrl: new URL('/download', window.location.origin).href
   })
 }
 
@@ -62,13 +82,15 @@ async function loadFromGitHubMeta() {
     showDownload({
       fileName: asset.name,
       sizeLabel: `${sizeMb.toFixed(1)} MB`,
-      version: String(release.tag_name ?? '').replace(/^v/i, '') || parseVersion(asset.name)
+      version: String(release.tag_name ?? '').replace(/^v/i, '') || parseVersion(asset.name),
+      directUrl: new URL(DOWNLOAD_PATH, window.location.origin).href
     })
   } catch {
     showDownload({
       fileName: 'Studio-Live-Setup-0.1.0.exe',
       sizeLabel: null,
-      version: '0.1.0'
+      version: '0.1.0',
+      directUrl: new URL(DOWNLOAD_PATH, window.location.origin).href
     })
   }
 }
