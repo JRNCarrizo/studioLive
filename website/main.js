@@ -17,17 +17,26 @@ function isLocalDev() {
   return h === '127.0.0.1' || h === 'localhost'
 }
 
-function showDownload({ href, fileName, sizeLabel, version }) {
+function showDownload({ href, fileName, sizeLabel, version, external = false }) {
   const btn = document.getElementById('downloadBtn')
   const meta = document.getElementById('downloadMeta')
   const versionLabel = document.getElementById('versionLabel')
 
   btn.hidden = false
   btn.href = href
-  btn.setAttribute('download', fileName)
-  btn.setAttribute('target', '_blank')
-  btn.setAttribute('rel', 'noopener noreferrer')
-  meta.textContent = sizeLabel ? `${fileName} · ${sizeLabel}` : fileName
+  btn.removeAttribute('target')
+  btn.removeAttribute('rel')
+  btn.removeAttribute('download')
+
+  if (external) {
+    // GitHub sirve el .exe con Content-Disposition; target=_blank deja una pestaña en blanco.
+    btn.setAttribute('rel', 'noopener')
+  } else {
+    btn.setAttribute('download', fileName)
+  }
+
+  const sizePart = sizeLabel ? `${fileName} · ${sizeLabel}` : fileName
+  meta.textContent = external ? `${sizePart} · descarga desde GitHub` : sizePart
   versionLabel.textContent = version ?? parseVersion(fileName)
 }
 
@@ -48,7 +57,8 @@ async function loadFromLocalServer() {
     href: data.downloadUrl,
     fileName: data.fileName,
     sizeLabel: data.sizeLabel,
-    version: parseVersion(data.fileName)
+    version: parseVersion(data.fileName),
+    external: false
   })
 }
 
@@ -57,7 +67,8 @@ function applyFallbackDownload() {
     href: RELEASE_FALLBACK.downloadUrl,
     fileName: RELEASE_FALLBACK.fileName,
     sizeLabel: null,
-    version: RELEASE_FALLBACK.version
+    version: RELEASE_FALLBACK.version,
+    external: true
   })
 }
 
@@ -83,7 +94,8 @@ async function loadFromGitHubRelease() {
       href: asset.browser_download_url,
       fileName: asset.name,
       sizeLabel: `${sizeMb.toFixed(1)} MB`,
-      version: String(release.tag_name ?? '').replace(/^v/i, '') || parseVersion(asset.name)
+      version: String(release.tag_name ?? '').replace(/^v/i, '') || parseVersion(asset.name),
+      external: true
     })
   } catch {
     applyFallbackDownload()
