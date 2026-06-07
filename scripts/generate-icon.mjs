@@ -9,7 +9,28 @@ const buildDir = path.join(root, 'build')
 const out = path.join(buildDir, 'icon.ico')
 const outCopy = path.join(buildDir, 'ICONOCAM.ico')
 const preview = path.join(buildDir, 'icon-preview.png')
+const websiteAssets = path.join(root, 'website', 'assets')
 const transparent = { r: 0, g: 0, b: 0, alpha: 0 }
+
+async function syncWebsiteAssets(imagePath) {
+  fs.mkdirSync(websiteAssets, { recursive: true })
+  const isIco = imagePath.toLowerCase().endsWith('.ico')
+  const pngSource = isIco
+    ? fs.existsSync(preview)
+      ? preview
+      : null
+    : imagePath
+  if (pngSource) {
+    await sharp(pngSource)
+      .resize(512, 512, { fit: 'contain', background: transparent })
+      .png()
+      .toFile(path.join(websiteAssets, 'logo.png'))
+  }
+  if (fs.existsSync(out)) {
+    fs.copyFileSync(out, path.join(websiteAssets, 'favicon.ico'))
+  }
+  if (pngSource) console.log('[generate-icon] synced → website/assets/logo.png')
+}
 
 const imageSources = ['IconCam.png', 'IconCam.jpeg', 'iconCam.png', 'iconCam.jpeg']
 
@@ -225,6 +246,7 @@ const { path: sourcePath, kind } = resolveSource()
 
 if (kind === 'ico') {
   fs.copyFileSync(out, outCopy)
+  await syncWebsiteAssets(out)
   console.log('[generate-icon] using your build/icon.ico as-is (add IconCam.png to regenerate)')
   process.exit(0)
 }
@@ -251,6 +273,7 @@ const pngBuffers = await Promise.all(
 const ico = await pngToIco(pngBuffers)
 fs.writeFileSync(out, ico)
 fs.copyFileSync(out, outCopy)
+await syncWebsiteAssets(preview)
 console.log(`[generate-icon] source → ${path.basename(sourcePath)}`)
 console.log(`[generate-icon] preview → ${preview}`)
 console.log(`[generate-icon] wrote ${out} (${ico.length} bytes)`)

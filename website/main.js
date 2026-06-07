@@ -1,3 +1,9 @@
+function parseVersion(fileName) {
+  const m =
+    /Setup[-\s]+([\d.]+)/i.exec(fileName) ?? /-([\d.]+)\.exe$/i.exec(fileName)
+  return m ? m[1] : 'local'
+}
+
 async function loadInstaller() {
   const btn = document.getElementById('downloadBtn')
   const meta = document.getElementById('downloadMeta')
@@ -16,9 +22,8 @@ async function loadInstaller() {
     btn.href = data.downloadUrl
     btn.download = data.fileName
     meta.textContent = `${data.fileName} · ${data.sizeLabel}`
-    const m = /Setup\s+([\d.]+)/i.exec(data.fileName)
-    versionLabel.textContent = m ? m[1] : 'local'
-  } catch (e) {
+    versionLabel.textContent = parseVersion(data.fileName)
+  } catch {
     err.hidden = false
     err.textContent =
       'No se pudo contactar al servidor local. Ejecutá npm run website en la carpeta del proyecto.'

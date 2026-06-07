@@ -3,58 +3,208 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="Studio Live — estudio multicámara local. Celulares como cámaras, ISO por pista y programa en vivo en tu PC."
+    />
     <title>Studio Live — Estudio multicámara local</title>
+    <link rel="icon" href="assets/favicon.ico" sizes="any" />
+    <link rel="apple-touch-icon" href="assets/logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header class="hero">
-      <p class="eyebrow">Windows · LAN · Sin nube</p>
-      <h1>Studio Live</h1>
-      <p class="lead">
-        Conectá celulares como cámaras, grabá ISO por pista y armá el programa en tu PC. Todo en red local.
-      </p>
-      <div class="cta">
-        <a id="downloadBtn" class="btn btn-primary" href="#" hidden>Descargar para Windows</a>
-        <p id="downloadMeta" class="meta"></p>
-        <p id="downloadErr" class="err" hidden></p>
+    <div class="page-bg" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <div class="container header-inner">
+        <a class="brand" href="#">
+          <img class="brand-logo" src="assets/logo.png" width="40" height="40" alt="" />
+          <span class="brand-name">Studio Live</span>
+        </a>
+        <nav class="header-nav">
+          <a href="#features">Funciones</a>
+          <a href="#install">Instalación</a>
+          <a class="nav-cta" href="#download">Descargar</a>
+        </nav>
       </div>
     </header>
 
     <main>
-      <section class="grid">
-        <article>
-          <h2>Sesión en vivo</h2>
-          <p>Grabación ISO por cámara (<code>cam-*.webm</code>) para editar después.</p>
-        </article>
-        <article>
-          <h2>Fusión por archivos</h2>
-          <p>Cargá las tomas, layouts, zoom y exportá un master WebM o MP4.</p>
-        </article>
-        <article>
-          <h2>Fusión en vivo</h2>
-          <p>Programa multicámara en tiempo real desde los celulares conectados.</p>
-        </article>
+      <section class="hero" id="download">
+        <div class="container hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">
+              <span class="dot" aria-hidden="true"></span>
+              Windows · Red local · Sin nube
+            </p>
+            <h1>Tu estudio multicámara,<br />directo en la PC</h1>
+            <p class="lead">
+              Conectá celulares como cámaras, grabá ISO por pista y armá el programa en vivo o por
+              archivos. Todo en tu red Wi‑Fi, sin subir video a internet.
+            </p>
+
+            <div class="hero-actions">
+              <a id="downloadBtn" class="btn btn-primary" href="#" hidden>
+                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path
+                    d="M12 3v12m0 0l4-4m-4 4L8 11M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                Descargar para Windows
+              </a>
+              <p id="downloadMeta" class="download-meta"></p>
+              <p id="downloadErr" class="download-err" hidden></p>
+            </div>
+
+            <ul class="hero-badges">
+              <li>Windows 10 / 11</li>
+              <li>Instalador incluido</li>
+              <li>Sin cuenta obligatoria</li>
+            </ul>
+          </div>
+
+          <div class="hero-visual">
+            <div class="logo-glow" aria-hidden="true"></div>
+            <img
+              class="hero-logo"
+              src="assets/logo.png"
+              width="280"
+              height="280"
+              alt="Logo de Studio Live"
+            />
+          </div>
+        </div>
       </section>
 
-      <section class="steps">
-        <h2>Instalación</h2>
-        <ol>
-          <li>Descargá el instalador y ejecutalo (Windows 10 o superior).</li>
-          <li>Si Windows SmartScreen avisa «editor desconocido», elegí «Más información» → «Ejecutar de todos modos».</li>
-          <li>Abrí Studio Live, escaneá el QR con el celular y aceptá el certificado HTTPS la primera vez.</li>
-        </ol>
+      <section class="features" id="features">
+        <div class="container">
+          <div class="section-head">
+            <h2>Todo lo que necesitás en un solo lugar</h2>
+            <p>Flujo pensado para creadores, clases, ensayos y directos desde casa o estudio chico.</p>
+          </div>
+
+          <div class="feature-grid">
+            <article class="feature-card">
+              <div class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M4 8V6a2 2 0 012-2h2M4 16v2a2 2 0 002 2h2m8-16h2a2 2 0 012 2v2m-4 12h2a2 2 0 002-2v-2M9 10l6 3-6 3V10z"
+                    stroke="currentColor"
+                    stroke-width="1.75"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+              </div>
+              <h3>Sesión en vivo</h3>
+              <p>
+                Cada cámara graba su ISO en <code>cam-*.webm</code>. Editá después con total libertad.
+              </p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z"
+                    stroke="currentColor"
+                    stroke-width="1.75"
+                  />
+                  <path d="M10 9l5 3-5 3V9z" fill="currentColor" />
+                </svg>
+              </div>
+              <h3>Fusión por archivos</h3>
+              <p>Cargá las tomas, layouts, zoom, motion y exportá master WebM o MP4.</p>
+            </article>
+            <article class="feature-card">
+              <div class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.75" />
+                  <path
+                    d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"
+                    stroke="currentColor"
+                    stroke-width="1.75"
+                    stroke-linecap="round"
+                  />
+                </svg>
+              </div>
+              <h3>Fusión en vivo</h3>
+              <p>Programa multicámara en tiempo real desde los celulares conectados a la misma red.</p>
+            </article>
+          </div>
+        </div>
       </section>
 
-      <section class="note">
-        <p>
-          Esta página corre en tu PC (<code>127.0.0.1</code>) para probar descargas antes de publicarla en internet.
-          Documentación del proyecto: <code>docs/ESTUDIO_LIVE_GUIA.md</code>.
-        </p>
+      <section class="install" id="install">
+        <div class="container install-panel">
+          <div class="install-copy">
+            <h2>Listo en tres pasos</h2>
+            <p class="install-lead">La primera vez tardás un par de minutos; después es abrir y grabar.</p>
+          </div>
+          <ol class="install-steps">
+            <li>
+              <span class="step-num">1</span>
+              <div>
+                <strong>Descargá e instalá</strong>
+                <p>Ejecutá el instalador en Windows 10 o superior.</p>
+              </div>
+            </li>
+            <li>
+              <span class="step-num">2</span>
+              <div>
+                <strong>SmartScreen (si aparece)</strong>
+                <p>Elegí «Más información» → «Ejecutar de todos modos». Aún no hay firma de editor.</p>
+              </div>
+            </li>
+            <li>
+              <span class="step-num">3</span>
+              <div>
+                <strong>Conectá el celular</strong>
+                <p>Escaneá el QR, aceptá el certificado HTTPS la primera vez y listo.</p>
+              </div>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="requirements">
+        <div class="container req-grid">
+          <div>
+            <h2>Requisitos</h2>
+            <ul>
+              <li>PC con Windows 10 o 11 (64 bits)</li>
+              <li>Wi‑Fi compartida entre PC y celulares</li>
+              <li>Chrome o Safari en el teléfono</li>
+            </ul>
+          </div>
+          <div class="note-card">
+            <p>
+              <strong>Modo local:</strong> esta página corre en tu PC (<code>127.0.0.1</code>) para probar
+              descargas. Para publicarla en internet podés usar Netlify y el instalador en GitHub
+              Releases.
+            </p>
+          </div>
+        </div>
       </section>
     </main>
 
-    <footer>
-      <p>Studio Live · v<span id="versionLabel">—</span></p>
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <div class="footer-brand">
+          <img src="assets/logo.png" width="32" height="32" alt="" />
+          <span>Studio Live</span>
+        </div>
+        <p class="footer-version">Versión <span id="versionLabel">—</span></p>
+      </div>
     </footer>
 
     <script src="main.js"></script>
