@@ -15,6 +15,7 @@ export type UpdateEventPayload =
 const requireUpdater = createRequire(import.meta.url)
 
 let mainWindow: BrowserWindow | null = null
+let userInitiatedCheck = false
 
 function sendUpdateEvent(payload: UpdateEventPayload): void {
   mainWindow?.webContents.send('studio:update-event', payload)
@@ -29,15 +30,11 @@ function friendlyUpdateError(raw: string): string {
     lower.includes('cannot find') ||
     lower.includes('no published versions')
   ) {
-    return [
-      'No se encontró un Release válido en GitHub (falta latest.yml o el tag v0.x.x).',
-      'Publicá el Release con npm run dist:publish o subí latest.yml + el .exe al Release.'
-    ].join(' ')
+    return 'Todavía no hay Release publicado en GitHub con latest.yml. Ejecutá npm run release:upload en el proyecto.'
   }
   return raw
 }
 
-/** electron-updater es CJS; import ESM falla en el .exe empaquetado. */
 function loadAutoUpdater(): AppUpdater | null {
   try {
     return requireUpdater('electron-updater').autoUpdater as AppUpdater
@@ -76,28 +73,44 @@ export function setupAutoUpdater(): void {
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = false
 
-  autoUpdater.on('checking-for-update', () => sendUpdateEvent({ phase: 'checking' }))
+  autoUpdater.on('checking-for-update', () => {
+    if (userInitiatedCheck) sendUpdateEvent({ phase: 'checking' })
+  })
   autoUpdater.on('update-available', (info) => {
     sendUpdateEvent({ phase: 'available', version: info.version })
   })
-  autoUpdater.on('update-not-available', () => sendUpdateEvent({ phase: 'not-available' }))
+  autoUpdater.on('update-not-available', () => {
+    if (userInitiatedCheck) {
+      sendUpdateEvent({ phase: 'not-available' })
+      userInitiatedCheck = false
+    }
+  })
   autoUpdater.on('download-progress', (progress) => {
     sendUpdateEvent({ phase: 'downloading', percent: progress.percent })
   })
   autoUpdater.on('update-downloaded', (info) => {
     sendUpdateEvent({ phase: 'ready', version: info.version })
+    userInitiatedCheck = false
   })
   autoUpdater.on('error', (err) => {
+    if (!userInitiatedCheck) {
+      console.warn('[studio-update]', friendlyUpdateError(err.message))
+      return
+    }
     sendUpdateEvent({ phase: 'error', message: friendlyUpdateError(err.message) })
+    userInitiatedCheck = false
   })
 
   ipcMain.handle('studio:check-for-updates', async () => {
+    userInitiatedCheck = true
+    sendUpdateEvent({ phase: 'checking' })
     try {
       await autoUpdater.checkForUpdates()
       return { ok: true as const }
     } catch (e) {
       const message = friendlyUpdateError(e instanceof Error ? e.message : String(e))
       sendUpdateEvent({ phase: 'error', message })
+      userInitiatedCheck = false
       return { ok: false as const, message }
     }
   })
@@ -107,12 +120,9 @@ export function setupAutoUpdater(): void {
     return true
   })
 
-  /** No bloquear el arranque (signaling + UI primero). */
   setTimeout(() => {
     void autoUpdater.checkForUpdates().catch((e) => {
-      const message = friendlyUpdateError(e instanceof Error ? e.message : String(e))
-      console.warn('[studio-update]', message)
-      sendUpdateEvent({ phase: 'error', message })
+      console.warn('[studio-update]', friendlyUpdateError(e instanceof Error ? e.message : String(e)))
     })
   }, 8000)
 }

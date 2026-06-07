@@ -9,6 +9,7 @@ import {
   desktopCapturer,
   dialog,
   ipcMain,
+  nativeImage,
   net,
   protocol,
   session
@@ -86,6 +87,15 @@ async function ensureCameraClientDir(): Promise<string> {
   return dir
 }
 
+function resolveAppIconPath(): string {
+  if (app.isPackaged) return path.join(process.resourcesPath, 'icon.ico')
+  return path.join(app.getAppPath(), 'build', 'icon.ico')
+}
+
+function getAppIcon() {
+  return nativeImage.createFromPath(resolveAppIconPath())
+}
+
 function createWindow(): void {
   const viteDev = Boolean(process.env.ELECTRON_RENDERER_URL)
   const devToolsOptOut =
@@ -98,6 +108,7 @@ function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
+    icon: getAppIcon(),
     webPreferences: {
       preload: path.join(__dirname, '../preload/index.cjs'),
       contextIsolation: true,
@@ -425,6 +436,9 @@ ipcMain.handle('studio:export-cert', async () => {
 })
 
 app.whenReady().then(async () => {
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('app.studiolive.desktop')
+  }
   setupAutoUpdater()
   protocol.handle('studio-webm', async (request) => {
     try {

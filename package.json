@@ -15,8 +15,9 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "dist": "npm run build && electron-builder",
-    "dist:win": "npm run build && electron-builder --win",
+    "dist:win": "node scripts/dist-win.mjs",
     "dist:publish": "npm run build && electron-builder --win --publish always",
+    "release:upload": "node scripts/upload-github-release.mjs",
     "website": "node scripts/serve-download-site.mjs"
   },
   "dependencies": {
@@ -35,10 +36,13 @@
     "@types/ws": "^8.5.13",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^33.3.1",
-    "electron-vite": "^2.3.0",
     "electron-builder": "^25.1.8",
+    "electron-vite": "^2.3.0",
+    "png-to-ico": "^3.0.1",
+    "rcedit": "^4.0.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "sharp": "^0.34.5",
     "typescript": "^5.7.2",
     "vite": "^5.4.11"
   },
@@ -57,25 +61,37 @@
       {
         "from": "camera-client",
         "to": "camera-client"
+      },
+      {
+        "from": "build/icon.ico",
+        "to": "icon.ico"
       }
     ],
     "asarUnpack": [
       "**/node_modules/ffmpeg-static/**",
       "**/node_modules/electron-updater/**"
     ],
+    "icon": "build/icon.ico",
+    "afterPack": "scripts/embed-icon.cjs",
+    "afterAllArtifactBuild": "scripts/embed-installer-icon.cjs",
     "win": {
       "artifactName": "Studio-Live-Setup-${version}.${ext}",
+      "icon": "build/icon.ico",
       "signAndEditExecutable": false,
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
     },
     "publish": [
       {
