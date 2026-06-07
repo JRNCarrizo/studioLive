@@ -28,6 +28,8 @@ function applyDownloadLinks({ url, fileName, sizeLabel, version }) {
   const versionLabel = document.getElementById('versionLabel')
 
   btn.href = url
+  btn.target = '_blank'
+  btn.rel = 'noopener noreferrer'
   alt.href = RELEASES_PAGE
   meta.textContent = sizeLabel ? `${fileName} · ${sizeLabel}` : fileName
   versionLabel.textContent = version ?? parseVersion(fileName)
