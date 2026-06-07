@@ -27,7 +27,7 @@ function showCopyFeedback() {
   const status = document.getElementById('downloadStatus')
   status.hidden = false
   status.textContent =
-    'Enlace copiado. Pegalo en Chrome o Edge y Enter, o clic derecho en el .exe en GitHub → Guardar enlace como…'
+    'Enlace copiado. En GitHub: clic derecho en el .exe → Abrir enlace en una pestaña nueva.'
   window.setTimeout(() => {
     status.hidden = true
   }, 8000)
