@@ -95,6 +95,35 @@ export const btnAudio: CSSProperties = {
   gap: 8
 }
 
+/** Mismo botón cuando el mic de PC aún no está activo (no se graba hasta activarlo). */
+export const btnAudioInactive: CSSProperties = {
+  padding: '8px 14px',
+  borderRadius: 8,
+  border: '1px dashed #64748b',
+  background: '#0f172a',
+  color: '#94a3b8',
+  fontWeight: 600,
+  fontSize: 12,
+  cursor: 'pointer',
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 8
+}
+
+export function pcAudioToolbarButton(active: boolean): CSSProperties {
+  return active ? btnAudio : btnAudioInactive
+}
+
+export function pcAudioToolbarLabel(active: boolean): string {
+  return active ? 'Audio de PC · activo' : 'Audio de PC · desactivado'
+}
+
+export function pcAudioToolbarTitle(active: boolean): string {
+  return active
+    ? 'Mic de PC activo — se incluye en la grabación.'
+    : 'El audio de PC no se graba hasta activarlo acá (elegí entrada y pulsá «Activar audio»).'
+}
+
 export const pathLineMuted: CSSProperties = {
   fontSize: 11,
   color: '#64748b',

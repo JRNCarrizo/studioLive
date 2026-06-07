@@ -337,16 +337,20 @@ export function FloatingPcAudioPanel({
 
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div style={{ fontSize: 11, color: '#94a3b8', lineHeight: 1.45 }}>
-          Elegí entrada y ajustá <strong style={{ color: '#cbd5e1' }}>ganancia hacia la grabación</strong>. El medidor
-          es post-fader: si ves <strong style={{ color: '#fecaca' }}>CLIP</strong>, bajá ganancia o la mezcla de la
-          interfaz antes de grabar.
           {hasLiveTrack ? (
             <>
-              {' '}
-              Con el mic activo, algunas interfaces bloquean YouTube/Spotify: usá <strong style={{ color: '#cbd5e1' }}>Soltar mic</strong>{' '}
-              hasta grabar.
+              Elegí entrada y ajustá <strong style={{ color: '#cbd5e1' }}>ganancia hacia la grabación</strong>. El medidor
+              es post-fader: si ves <strong style={{ color: '#fecaca' }}>CLIP</strong>, bajá ganancia o la mezcla de la
+              interfaz antes de grabar. Con el mic activo, algunas interfaces bloquean YouTube/Spotify: usá{' '}
+              <strong style={{ color: '#cbd5e1' }}>Soltar mic</strong> hasta grabar.
             </>
-          ) : null}
+          ) : (
+            <>
+              <strong style={{ color: '#fcd34d' }}>Por defecto no se graba audio de PC.</strong> Elegí la entrada y
+              pulsá <strong style={{ color: '#cbd5e1' }}>Activar audio</strong> antes de grabar si querés mic o mezcla
+              del sistema.
+            </>
+          )}
         </div>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>

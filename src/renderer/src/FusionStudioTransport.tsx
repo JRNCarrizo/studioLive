@@ -1,4 +1,4 @@
-﻿import { useState } from 'react'
+﻿import { useEffect, useState } from 'react'
 
 import { fmtPlanTime } from './fusionCameraPlan'
 import { GLYPH } from './uiGlyphs'
@@ -29,6 +29,7 @@ export type IsoTransportPhase = 'idle' | 'recording' | 'paused' | 'pending'
 type FilesProps = {
   mode?: 'files'
   visible: boolean
+  forceFloating?: boolean
   playing: boolean
   fusionRecording: boolean
   fusionRecorderPaused: boolean
@@ -50,6 +51,7 @@ type FilesProps = {
 type LiveProps = {
   mode: 'live'
   visible: boolean
+  forceFloating?: boolean
   fusionRecording: boolean
   elapsedLabel: string
   canRecord: boolean
@@ -62,6 +64,7 @@ type LiveProps = {
 type IsoProps = {
   mode: 'iso'
   visible: boolean
+  forceFloating?: boolean
   phase: IsoTransportPhase
   elapsedLabel: string
   sourcesLabel: string
@@ -97,8 +100,9 @@ export function FusionStudioTransport(props: FusionStudioTransportProps) {
   const isProgramLive = mode === 'live'
   const isIso = mode === 'iso'
   const keys = STORAGE[mode === 'files' ? 'files' : mode === 'live' ? 'live' : 'iso']
+  const forceFloating = props.forceFloating ?? false
 
-  const [floating, setFloating] = useState(() => readBool(keys.float, false))
+  const [floating, setFloating] = useState(() => forceFloating || readBool(keys.float, false))
   const { pos, rootRef, startDrag } = useFloatingPanelPosition(keys.pos, defaultFloatPos)
 
   const isoPhase = isIso ? props.phase : null
@@ -136,6 +140,7 @@ export function FusionStudioTransport(props: FusionStudioTransportProps) {
         : 'STBY'
 
   const toggleFloating = () => {
+    if (forceFloating) return
     setFloating((v) => {
       const next = !v
       try {
@@ -146,6 +151,10 @@ export function FusionStudioTransport(props: FusionStudioTransportProps) {
       return next
     })
   }
+
+  useEffect(() => {
+    if (forceFloating) setFloating(true)
+  }, [forceFloating])
 
   if (!props.visible) return null
 
@@ -184,7 +193,14 @@ export function FusionStudioTransport(props: FusionStudioTransportProps) {
             type="button"
             className={`fusion-dock-transport__chrome-btn fusion-dock-transport__float-btn${floating ? ' fusion-dock-transport__chrome-btn--on' : ''}`}
             onClick={toggleFloating}
-            title={floating ? 'Anclar abajo' : 'Desanclar (ventana flotante)'}
+            disabled={forceFloating}
+            title={
+              forceFloating
+                ? 'En modo solo controles la barra queda fija'
+                : floating
+                  ? 'Anclar abajo'
+                  : 'Desanclar (ventana flotante)'
+            }
           >
             {floating ? GLYPH.floatOn : GLYPH.floatOff}
           </button>

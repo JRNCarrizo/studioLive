@@ -36,6 +36,8 @@ declare global {
       copyText: (text: string) => Promise<boolean>
       exportCert: () => Promise<boolean>
       minimizeMainWindow: () => Promise<boolean>
+      setCompactWindow: (enabled: boolean) => Promise<{ ok: boolean }>
+      isCompactWindow: () => Promise<boolean>
       isExcludeFromCaptureSupported: () => Promise<boolean>
       setExcludeFromCapture: (enabled: boolean) => Promise<{ ok: boolean; supported: boolean }>
       setPendingDisplaySource: (sourceId: string) => Promise<boolean>

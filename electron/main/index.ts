@@ -12,6 +12,7 @@ import {
   nativeImage,
   net,
   protocol,
+  screen,
   session
 } from 'electron'
 import {
@@ -75,6 +76,13 @@ const DEFAULT_SIGNAL_PORT = 8788
 const PORT_TRIES = 10
 
 let mainWindow: BrowserWindow | null = null
+let compactWindowRestore: {
+  bounds: Electron.Rectangle
+  alwaysOnTop: boolean
+  minimumWidth: number
+  minimumHeight: number
+  resizable: boolean
+} | null = null
 let signalingPort = DEFAULT_SIGNAL_PORT
 let loopbackSignalingPort = DEFAULT_SIGNAL_PORT
 let hostPanelHttpPort = DEFAULT_SIGNAL_PORT + HOST_PANEL_HTTP_OFFSET
@@ -374,6 +382,49 @@ ipcMain.handle('studio:minimize-main-window', () => {
   mainWindow?.minimize()
   return true
 })
+
+const COMPACT_WINDOW_WIDTH = 440
+const COMPACT_WINDOW_HEIGHT = 172
+
+ipcMain.handle('studio:set-compact-window', (_e, enabled: boolean) => {
+  const w = mainWindow
+  if (!w || w.isDestroyed()) return { ok: false as const }
+  if (enabled) {
+    if (compactWindowRestore) return { ok: true as const }
+    const bounds = w.getBounds()
+    const [minimumWidth, minimumHeight] = w.getMinimumSize()
+    compactWindowRestore = {
+      bounds,
+      alwaysOnTop: w.isAlwaysOnTop(),
+      minimumWidth,
+      minimumHeight,
+      resizable: w.isResizable()
+    }
+    const display = screen.getDisplayMatching(bounds)
+    const { workArea } = display
+    w.setMinimumSize(COMPACT_WINDOW_WIDTH, COMPACT_WINDOW_HEIGHT)
+    w.setResizable(false)
+    w.setAlwaysOnTop(true, 'floating')
+    w.setBounds({
+      x: workArea.x + workArea.width - COMPACT_WINDOW_WIDTH - 16,
+      y: workArea.y + workArea.height - COMPACT_WINDOW_HEIGHT - 16,
+      width: COMPACT_WINDOW_WIDTH,
+      height: COMPACT_WINDOW_HEIGHT
+    })
+    return { ok: true as const }
+  }
+  if (compactWindowRestore) {
+    const prev = compactWindowRestore
+    compactWindowRestore = null
+    w.setResizable(prev.resizable)
+    w.setMinimumSize(prev.minimumWidth, prev.minimumHeight)
+    w.setAlwaysOnTop(prev.alwaysOnTop)
+    w.setBounds(prev.bounds)
+  }
+  return { ok: true as const }
+})
+
+ipcMain.handle('studio:is-compact-window', () => Boolean(compactWindowRestore))
 
 /** Windows 10+ / macOS: la ventana se ve en el monitor pero no entra en captura de pantalla (WDA_EXCLUDEFROMCAPTURE). */
 ipcMain.handle('studio:set-exclude-from-capture', (_e, enabled: boolean) => {

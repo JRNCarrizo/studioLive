@@ -46,6 +46,9 @@ contextBridge.exposeInMainWorld('studio', {
     ipcRenderer.invoke('studio:copy-text', text),
   exportCert: (): Promise<boolean> => ipcRenderer.invoke('studio:export-cert'),
   minimizeMainWindow: (): Promise<boolean> => ipcRenderer.invoke('studio:minimize-main-window'),
+  setCompactWindow: (enabled: boolean): Promise<{ ok: boolean }> =>
+    ipcRenderer.invoke('studio:set-compact-window', enabled),
+  isCompactWindow: (): Promise<boolean> => ipcRenderer.invoke('studio:is-compact-window'),
   isExcludeFromCaptureSupported: (): Promise<boolean> =>
     ipcRenderer.invoke('studio:is-exclude-from-capture-supported'),
   setExcludeFromCapture: (

@@ -21,6 +21,7 @@ import { FusionCameraPlanBar } from './FusionCameraPlanBar'
 import { fusionCameraColorMap, fusionSegmentColor, type FusionTimelineSegment } from './fusionCameraPlan'
 import { FusionScenePresetsPanel } from './FusionScenePresetsPanel'
 import { FusionStudioTransport } from './FusionStudioTransport'
+import { LiveCompactShell, LiveCompactToggleButton } from './LiveCompactShell'
 import { useFusionProgramHotkeys } from './fusionProgramHotkeys'
 import { useRecordingTrim } from './useRecordingTrim'
 import { ProgramLayoutEditorOverlay } from './ProgramLayoutEditorOverlay'
@@ -84,8 +85,10 @@ import {
   type SlotRect
 } from './programScenes'
 import {
-  btnAudio,
   btnNeutral,
+  pcAudioToolbarButton,
+  pcAudioToolbarLabel,
+  pcAudioToolbarTitle,
   workspaceActionRowLabel,
   workspaceEyebrow,
   workspaceInnerCard,
@@ -137,6 +140,11 @@ type LiveFusionPanelProps = {
   /** Abre el mic si hace falta al grabar programa en vivo. */
   ensurePcAudioForRecording: () => Promise<MediaStream | null>
   onAddDisplayCapture: () => void | Promise<void>
+  /** Ventana achicada a solo botones (compartido con Sesión en vivo). */
+  directorCompactMode?: boolean
+  onToggleDirectorCompact?: () => void
+  /** Restaura ventana y panel tras grabar en modo solo controles. */
+  onExitDirectorCompact?: () => void
   /** Solo atajos cuando esta pestaña está visible. */
   workspaceActive?: boolean
 }
@@ -386,6 +394,9 @@ export function LiveFusionPanel({
   hasPcAudio,
   ensurePcAudioForRecording,
   onAddDisplayCapture,
+  directorCompactMode = false,
+  onToggleDirectorCompact,
+  onExitDirectorCompact,
   workspaceActive = true
 }: LiveFusionPanelProps) {
   const cameraAliases = useCameraAliases()
@@ -1621,7 +1632,8 @@ export function LiveFusionPanel({
     parts.length = 0
     setProgramBlob(blob)
     onStatus('Grabación del programa lista. Guardá el WebM en la carpeta o reproducí la vista previa.')
-  }, [getProgramRecordTimeSec, onStatus, openProgramSeg])
+    onExitDirectorCompact?.()
+  }, [getProgramRecordTimeSec, onExitDirectorCompact, onStatus, openProgramSeg])
 
   const saveProgramBlob = useCallback(async () => {
     if (!programBlob || !outputDir) {
@@ -1735,7 +1747,8 @@ export function LiveFusionPanel({
     setOpenProgramSeg(null)
     setExportFileName('')
     onStatus('Grabación del programa cancelada (no se guardó nada).')
-  }, [onStatus])
+    onExitDirectorCompact?.()
+  }, [onExitDirectorCompact, onStatus])
 
   const disabledProgramRec = isoBusy || !cameraIds.length
 
@@ -1757,7 +1770,7 @@ export function LiveFusionPanel({
   })
 
   return (
-    <div style={workspaceInnerCard}>
+    <>
       {cancelFlowConfirm === 'recording' ? (
         <StudioConfirmModal
           message={
@@ -1817,6 +1830,29 @@ export function LiveFusionPanel({
         />
       ) : null}
 
+      {directorCompactMode ? (
+        <LiveCompactShell
+          onExpand={() => onToggleDirectorCompact?.()}
+          onOpenQr={onOpenQr}
+          onOpenAudio={onOpenAudio}
+          pcAudioActive={hasPcAudio}
+          hint="YouTube u otra app puede ocupar el monitor. Grabá el programa desde acá."
+        >
+          <FusionStudioTransport
+            mode="live"
+            visible={cameraIds.length > 0}
+            forceFloating
+            fusionRecording={programRecording}
+            elapsedLabel={programElapsedLabel}
+            canRecord={!disabledProgramRec && !programRecording && recordingReadiness.ready}
+            canCancel={(programRecording || programBlob !== null) && !exportBusy}
+            onRecordStart={() => void startProgramRecording()}
+            onRecordStop={() => void stopProgramRecording()}
+            onCancel={cancelProgramFlow}
+          />
+        </LiveCompactShell>
+      ) : (
+      <div style={workspaceInnerCard}>
       <div style={workspaceToolbar('teal')}>
         <div style={workspaceEyebrow}>Fusión en vivo</div>
         {cameraIds.length === 0 ? (
@@ -1857,11 +1893,11 @@ export function LiveFusionPanel({
           <button
             type="button"
             onClick={onOpenAudio}
-            style={btnAudio}
-            title="Mic de PC, nivel y ganancia (opcional en la mezcla)."
+            style={pcAudioToolbarButton(hasPcAudio)}
+            title={pcAudioToolbarTitle(hasPcAudio)}
           >
             <span aria-hidden style={{ fontSize: 14 }}>♪</span>
-            {hasPcAudio ? ' Audio de PC · activo' : ' Audio de PC'}
+            {pcAudioToolbarLabel(hasPcAudio)}
           </button>
           <button
             type="button"
@@ -1877,6 +1913,13 @@ export function LiveFusionPanel({
           >
             <span aria-hidden style={{ fontSize: 14 }}>⧉</span> Transmitir ventana o pestaña
           </button>
+          {onToggleDirectorCompact ? (
+            <LiveCompactToggleButton
+              active={directorCompactMode}
+              disabled={isoBusy || programRecording}
+              onClick={onToggleDirectorCompact}
+            />
+          ) : null}
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
           <span style={workspaceActionRowLabel}>Mezcla</span>
@@ -2878,6 +2921,9 @@ export function LiveFusionPanel({
         </div>
       ) : null}
 
+      </div>
+      )}
+
       <FloatingMotionPanel
         open={motionOpen && framingEditable && programCameraId != null}
         onClose={() => setMotionOpen(false)}
@@ -2907,6 +2953,6 @@ export function LiveFusionPanel({
         onChange={setProgramColorAdjust}
         onReset={resetProgramColorAdjust}
       />
-    </div>
+    </>
   )
 }

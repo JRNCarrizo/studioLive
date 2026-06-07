@@ -17,6 +17,7 @@ import { FusionPanel } from './FusionPanel'
 import { IsoRecordingReviewOverlay } from './IsoRecordingReviewOverlay'
 import { FusionStudioTransport } from './FusionStudioTransport'
 import { LiveFusionPanel } from './LiveFusionPanel'
+import { LiveCompactShell, LiveCompactToggleButton } from './LiveCompactShell'
 import {
   readStoredExcludeFromCapture,
   writeStoredExcludeFromCapture
@@ -35,7 +36,9 @@ import {
 } from './pcAudioCapture'
 import { UpdateBanner } from './UpdateBanner'
 import {
-  btnAudio,
+  pcAudioToolbarButton,
+  pcAudioToolbarLabel,
+  pcAudioToolbarTitle,
   btnNeutral,
   workspaceActionRowLabel,
   workspaceEyebrow,
@@ -219,6 +222,8 @@ export default function App() {
   const [outputDir, setOutputDir] = useState<string | null>(() => readStoredOutputDir())
   const [excludeFromCaptureSupported, setExcludeFromCaptureSupported] = useState(false)
   const [excludeFromCapture, setExcludeFromCapture] = useState(false)
+  /** Ventana achicada a solo botones (QR, audio, grabar) para no tapar YouTube / pantalla capturada. */
+  const [directorCompactMode, setDirectorCompactMode] = useState(false)
   const [recording, setRecording] = useState(false)
   const [isoPaused, setIsoPaused] = useState(false)
   /** Tras detener ISO: blobs en memoria hasta vista previa + guardar o descartar. */
@@ -381,6 +386,43 @@ export default function App() {
     return [...ids].sort()
   }, [cameras, streams])
 
+  const setDirectorCompact = useCallback(
+    async (enabled: boolean, silent = false) => {
+      if (enabled && !window.studio?.setCompactWindow) {
+        setStatus('Modo solo controles requiere la app Studio Live (Electron), no el navegador.')
+        return
+      }
+      const res = await window.studio?.setCompactWindow?.(enabled)
+      if (enabled && res && !res.ok) {
+        setStatus('No se pudo achicar la ventana.')
+        return
+      }
+      setDirectorCompactMode(enabled)
+      if (enabled) {
+        const hasScreenCapture = tileCameraIds.some((id) => isDisplayCaptureId(id))
+        if (hasScreenCapture && excludeFromCaptureSupported && !excludeFromCapture) {
+          await applyExcludeFromCapture(true, true)
+        }
+        setStatus(
+          'Solo controles: ventana chica abajo a la derecha. Dejá YouTube u otra app en pantalla y grabá desde acá.'
+        )
+      } else if (!silent) {
+        setStatus('Panel completo restaurado.')
+      }
+    },
+    [applyExcludeFromCapture, excludeFromCapture, excludeFromCaptureSupported, tileCameraIds]
+  )
+
+  const toggleDirectorCompact = useCallback(() => {
+    void setDirectorCompact(!directorCompactMode)
+  }, [directorCompactMode, setDirectorCompact])
+
+  useEffect(() => {
+    if (workspaceMode !== 'live' && workspaceMode !== 'liveFusion' && directorCompactMode) {
+      void setDirectorCompact(false)
+    }
+  }, [workspaceMode, directorCompactMode, setDirectorCompact])
+
   const pcMix = usePcAudioMix(audioStream, pcAudioGainPercent / 100)
   const pcRecordingStream = pcMix.processedStream ?? audioStream
 
@@ -513,7 +555,7 @@ export default function App() {
               : ' Si YouTube se ve congelado: desactivá aceleración por hardware en el navegador o usá npm run dev:no-gpu.'
             : ''
       setStatus(
-        `${kindLabel} agregada como fuente «${defaultAlias}». Se graba con las demás al iniciar ISO. Evitá capturar la ventana de Studio Live (efecto espejo).${screenTip}`
+        `${kindLabel} agregada como fuente «${defaultAlias}». Se graba con las demás al iniciar ISO. Evitá capturar la ventana de Studio Live (efecto espejo).${screenTip} Tip: «Solo controles» achica la ventana para no tapar YouTube.`
       )
     },
     [applyExcludeFromCapture, cameraAliases, closeVideoSource, excludeFromCaptureSupported]
@@ -970,6 +1012,10 @@ export default function App() {
       void document.exitFullscreen().catch(() => {})
     }
 
+    if (directorCompactMode) {
+      void setDirectorCompact(false, true)
+    }
+
     if (!items.length) {
       setStatus('No había datos en las pistas al detener.')
       return
@@ -980,7 +1026,7 @@ export default function App() {
     setStatus(
       'Grabación detenida. Revisá la vista previa de cada toma; después elegí carpeta y Guardar en disco o Descartar.'
     )
-  }, [])
+  }, [directorCompactMode, setDirectorCompact])
 
   const pauseIsoRecording = useCallback(() => {
     if (!recording || isoPaused) return
@@ -1211,7 +1257,11 @@ export default function App() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div
+      className={directorCompactMode ? 'studio-app studio-app--director-compact' : 'studio-app'}
+      style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
+    >
+      {!directorCompactMode ? (
       <header
         style={{
           padding: '14px 16px',
@@ -1396,9 +1446,46 @@ export default function App() {
           {signalingReady ? 'Señalización: OK' : 'Señalización: no'}
         </span>
       </header>
+      ) : null}
 
-      <section style={{ padding: 16, flex: 1, overflow: 'auto' }}>
+      <section
+        style={{ padding: directorCompactMode ? 8 : 16, flex: 1, overflow: directorCompactMode ? 'hidden' : 'auto' }}
+        className={directorCompactMode ? 'live-compact-section' : undefined}
+      >
         <div style={{ display: workspaceMode === 'live' ? 'block' : 'none' }}>
+        {directorCompactMode ? (
+          <LiveCompactShell
+            onExpand={() => void setDirectorCompact(false)}
+            onOpenQr={openQrPopover}
+            onOpenAudio={openAudioPanel}
+            pcAudioActive={Boolean(audioStream)}
+            hint="YouTube u otra app puede ocupar el monitor. Grabá desde acá."
+          >
+            <FusionStudioTransport
+              mode="iso"
+              visible
+              forceFloating
+              phase={
+                pendingIsoSave && !recording
+                  ? 'pending'
+                  : recording
+                    ? isoPaused
+                      ? 'paused'
+                      : 'recording'
+                    : 'idle'
+              }
+              elapsedLabel={isoElapsedLabel}
+              sourcesLabel={isoSourcesSummary.label}
+              pauseSupported={ISO_RECORDER_CAN_PAUSE}
+              canStart={!isoBusy && Boolean(outputDir)}
+              onStart={onIsoStartClick}
+              onPause={pauseIsoRecording}
+              onResume={resumeIsoRecording}
+              onStop={() => void stopRecording()}
+              statusLine={status}
+            />
+          </LiveCompactShell>
+        ) : (
         <div style={workspaceInnerCard}>
           <div style={workspaceToolbar('sky')}>
             <div style={workspaceEyebrow}>Sesión en vivo</div>
@@ -1442,11 +1529,11 @@ export default function App() {
               <button
                 type="button"
                 onClick={openAudioPanel}
-                style={btnAudio}
-                title="Mic de PC, nivel y ganancia (opcional en la grabación ISO)."
+                style={pcAudioToolbarButton(Boolean(audioStream))}
+                title={pcAudioToolbarTitle(Boolean(audioStream))}
               >
                 <span aria-hidden style={{ fontSize: 14 }}>♪</span>
-                {audioStream ? ' Audio de PC · activo' : ' Audio de PC'}
+                {pcAudioToolbarLabel(Boolean(audioStream))}
               </button>
               <button
                 type="button"
@@ -1466,6 +1553,11 @@ export default function App() {
               >
                 <span aria-hidden style={{ fontSize: 14 }}>⧉</span> Transmitir ventana o pestaña
               </button>
+              <LiveCompactToggleButton
+                active={directorCompactMode}
+                disabled={isoBusy}
+                onClick={toggleDirectorCompact}
+              />
             </div>
             {tileCameraIds.length === 0 ? (
               <div style={{ fontSize: 11, color: '#64748b', lineHeight: 1.45 }}>
@@ -1557,6 +1649,7 @@ export default function App() {
           />
         ) : null}
         </div>
+        )}
         </div>
 
         <FloatingPcAudioPanel
@@ -1615,6 +1708,9 @@ export default function App() {
         <div style={{ display: workspaceMode === 'liveFusion' ? 'block' : 'none' }}>
           <LiveFusionPanel
             workspaceActive={workspaceMode === 'liveFusion'}
+            directorCompactMode={directorCompactMode}
+            onToggleDirectorCompact={toggleDirectorCompact}
+            onExitDirectorCompact={() => void setDirectorCompact(false, true)}
             cameraIds={tileCameraIds}
             streams={streams}
             rtcStates={laneRtcState}
