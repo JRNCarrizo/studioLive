@@ -24,6 +24,12 @@ jobs:
       - name: Install
         run: npm ci
 
+      - name: Align package version with git tag
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          node -e "const fs=require('fs'); const p='package.json'; const j=JSON.parse(fs.readFileSync(p,'utf8')); j.version='${VERSION}'; fs.writeFileSync(p, JSON.stringify(j,null,2)+'\n');"
+
       - name: Build app
         run: npm run build
 
