@@ -1,6 +1,7 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 
 import { CameraConnectQR } from './CameraConnectQR'
+import { ConnectCameraGuide } from './ConnectCameraGuide'
 
 type StudioCameraWorkspace = 'live' | 'liveFusion'
 
@@ -16,6 +17,10 @@ type Props = {
   presetOptions: VideoPresetOption[]
   onPresetChange: (id: string) => void
   presetDisabled: boolean
+  signalingReady: boolean
+  cameraIds: string[]
+  streams: Record<string, MediaStream | undefined>
+  rtcStates: Record<string, string | undefined>
   pingUrls: string[]
   localPreviewUrl: string
   onCopyUrl: (url: string) => void
@@ -32,6 +37,10 @@ export function QrConnectOverlay({
   presetOptions,
   onPresetChange,
   presetDisabled,
+  signalingReady,
+  cameraIds,
+  streams,
+  rtcStates,
   pingUrls,
   localPreviewUrl,
   onCopyUrl,
@@ -46,6 +55,12 @@ export function QrConnectOverlay({
     return () => window.removeEventListener('keydown', onKey)
   }, [open, onClose])
 
+  const recommendedConnectUrl = useMemo(() => {
+    const ip = ips[0]
+    if (!ip || port == null) return ''
+    return `https://${ip}:${port}/?preset=${encodeURIComponent(preset)}&studioWorkspace=${workspace}`
+  }, [ips, port, preset, workspace])
+
   if (!open) return null
 
   const presetHint = presetOptions.find((o) => o.id === preset)?.hint
@@ -54,6 +69,7 @@ export function QrConnectOverlay({
     <div
       role="dialog"
       aria-modal="true"
+      aria-labelledby="qr-connect-title"
       onClick={onClose}
       style={{
         position: 'fixed',
@@ -70,7 +86,7 @@ export function QrConnectOverlay({
       <div
         onClick={(e) => e.stopPropagation()}
         style={{
-          width: 'min(720px, 100%)',
+          width: 'min(780px, 100%)',
           maxHeight: 'calc(100vh - 48px)',
           overflow: 'auto',
           borderRadius: 14,
@@ -92,11 +108,11 @@ export function QrConnectOverlay({
           }}
         >
           <div>
-            <div style={{ fontSize: 14, fontWeight: 700 }}>
+            <div id="qr-connect-title" style={{ fontSize: 14, fontWeight: 700 }}>
               Conectar cámaras — {workspace === 'liveFusion' ? 'Fusión en vivo' : 'Sesión en vivo'}
             </div>
             <div style={{ fontSize: 11, color: '#64748b' }}>
-              Escaneá con el celular en la misma Wi-Fi. Cerrá con Esc o tocando fuera.
+              Misma Wi‑Fi · Chrome o Safari en el celular · Esc para cerrar
             </div>
           </div>
           <button
@@ -117,7 +133,21 @@ export function QrConnectOverlay({
           </button>
         </div>
 
-        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <ConnectCameraGuide
+            ips={ips}
+            port={port}
+            signalingReady={signalingReady}
+            cameraIds={cameraIds}
+            streams={streams}
+            rtcStates={rtcStates}
+            pingUrls={pingUrls}
+            connectUrl={recommendedConnectUrl}
+            onCopyConnectUrl={onCopyUrl}
+            onCopyPingUrl={onCopyUrl}
+            onExportCert={onExportCert}
+          />
+
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
             <span style={{ fontSize: 12, color: '#94a3b8' }}>Calidad de video (celulares):</span>
             <select
@@ -164,19 +194,15 @@ export function QrConnectOverlay({
               preset={preset}
               workspace={workspace}
               onCopyUrl={onCopyUrl}
-              onExportCert={onExportCert}
             />
           )}
 
           <details style={{ fontSize: 12, color: '#94a3b8' }}>
-            <summary style={{ cursor: 'pointer', color: '#cbd5e1' }}>
-              HTTPS no carga o el celular no confía en la página
-            </summary>
+            <summary style={{ cursor: 'pointer', color: '#cbd5e1' }}>Más ayuda (HTTPS, ping, PC local)</summary>
             <ol style={{ paddingLeft: 18, marginTop: 10, lineHeight: 1.55 }}>
               <li>
-                Probar TLS desde el celular: abrí una URL de ping (debería verse el texto{' '}
-                <code style={{ color: '#86efac' }}>studio-live-ok</code>). Si no abre, revisá mismo Wi-Fi, firewall en
-                Windows (permitir Node/Electron en redes privadas) y que la IP sea la correcta.
+                Probar TLS desde el celular: abrí una URL de ping (debería verse{' '}
+                <code style={{ color: '#86efac' }}>studio-live-ok</code>).
                 <div style={{ marginTop: 8 }}>
                   {pingUrls.map((u) => (
                     <div key={u} style={{ wordBreak: 'break-all' }}>
@@ -187,17 +213,7 @@ export function QrConnectOverlay({
               </li>
               <li style={{ marginTop: 10 }}>
                 En la PC, probá en Chrome/Edge:{' '}
-                <code style={{ wordBreak: 'break-all', color: '#cbd5e1' }}>{localPreviewUrl || '—'}</code>. Si acá
-                funciona y en el celular no, el problema suele ser confianza del certificado en el teléfono.
-              </li>
-              <li style={{ marginTop: 10 }}>
-                <strong>Android:</strong> exportá el certificado con el botón de arriba, pasalo al teléfono y en
-                Ajustes → Seguridad → Cifrado / Credenciales → Instalar certificado → &quot;VPN y aplicaciones&quot; o
-                &quot;CA&quot; según tu versión.
-              </li>
-              <li style={{ marginTop: 8 }}>
-                <strong>iPhone:</strong> enviate el .crt por Mail/AirDrop, instalá el perfil y en Ajustes → General →
-                Información → Ajustes de confianza del certificado activá confianza para ese perfil.
+                <code style={{ wordBreak: 'break-all', color: '#cbd5e1' }}>{localPreviewUrl || '—'}</code>
               </li>
               <li style={{ marginTop: 8 }}>
                 No abras el link dentro de WhatsApp: usá &quot;Abrir en Chrome&quot; o &quot;Abrir en Safari&quot;.

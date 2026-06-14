@@ -2937,3 +2937,159 @@ button:not(:disabled) {
   max-width: 100%;
   box-shadow: none;
 }
+
+/* Asistente conectar celular (popover QR) */
+.connect-camera-guide {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid #1e3a5f;
+  background: linear-gradient(180deg, rgba(12, 74, 110, 0.25) 0%, rgba(15, 23, 42, 0.5) 100%);
+}
+
+.connect-camera-guide__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.connect-camera-guide__headline {
+  font-size: 15px;
+  font-weight: 700;
+  color: #e2e8f0;
+}
+
+.connect-camera-guide__subline {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #94a3b8;
+  line-height: 1.45;
+}
+
+.connect-camera-guide__badges {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.connect-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid #475569;
+  color: #64748b;
+  background: rgba(15, 23, 42, 0.8);
+}
+
+.connect-badge--ok {
+  border-color: #166534;
+  color: #bbf7d0;
+  background: rgba(22, 101, 52, 0.35);
+}
+
+.connect-camera-guide__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.connect-camera-guide__step {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #334155;
+}
+
+.connect-camera-guide__step-num {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 800;
+  color: #cbd5e1;
+}
+
+.connect-camera-guide__step-title {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.connect-camera-guide__step-detail {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #94a3b8;
+  line-height: 1.5;
+}
+
+.connect-camera-guide__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.connect-camera-guide__diag {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #854d0e;
+  background: rgba(120, 53, 15, 0.25);
+  font-size: 11px;
+  color: #fde68a;
+  line-height: 1.55;
+}
+
+.connect-camera-guide__diag p {
+  margin: 0 0 6px;
+}
+
+.connect-camera-guide__diag p:last-child {
+  margin-bottom: 0;
+}
+
+.connect-camera-guide__diag-url {
+  color: #fcd34d !important;
+}
+
+.connect-camera-guide__diag-url code {
+  color: #fef3c7;
+  word-break: break-all;
+}
+
+.connect-camera-guide__optional {
+  font-size: 11px;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.connect-camera-guide__optional summary {
+  cursor: pointer;
+  color: #94a3b8;
+}
+
+.connect-camera-guide__optional p {
+  margin: 8px 0;
+}
+
+.connect-camera-guide__cert-btn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #854d0e;
+  background: #422006;
+  color: #fde68a;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}

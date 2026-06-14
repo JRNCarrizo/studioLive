@@ -1678,18 +1678,22 @@ export default function App() {
           presetOptions={VIDEO_PRESET_OPTIONS}
           onPresetChange={(id) => setVideoPreset(id as VideoPresetId)}
           presetDisabled={isoBusy}
+          signalingReady={signalingReady}
+          cameraIds={tileCameraIds}
+          streams={streams}
+          rtcStates={laneRtcState}
           pingUrls={pingUrls}
           localPreviewUrl={localPreviewUrl}
           onCopyUrl={(u) => {
             void window.studio.copyText(u).then(() =>
-              setStatus('URL copiada al portapapeles. Pegala en el navegador del celular (Chrome / Safari).')
+              setStatus('Copiado. Pegalo en Chrome o Safari del celular (no en WhatsApp).')
             )
           }}
           onExportCert={() => {
             void window.studio.exportCert().then((ok) =>
               setStatus(
                 ok
-                  ? 'Certificado guardado. Pasalo al celular e instalalo (ver ayuda del popover).'
+                  ? 'Certificado guardado. Pasalo al celular e instalalo desde Ajustes (opcional).'
                   : 'No se pudo exportar el certificado (¿guardaste antes que arrancara el servidor?).'
               )
             )

@@ -9,7 +9,6 @@ type Props = {
   preset: string
   workspace: StudioCameraWorkspace
   onCopyUrl: (url: string) => void
-  onExportCert: () => void
   /** Tamaño en px del QR (lado del cuadrado). */
   size?: number
 }
@@ -24,8 +23,7 @@ export function CameraConnectQR({
   preset,
   workspace,
   onCopyUrl,
-  onExportCert,
-  size = 208
+  size = 220
 }: Props) {
   const [ipIdx, setIpIdx] = useState(0)
 
@@ -94,14 +92,14 @@ export function CameraConnectQR({
           Escaneá con la cámara del celular
         </div>
         <div style={{ fontSize: 12, color: '#94a3b8', marginBottom: 10, lineHeight: 1.45 }}>
-          Apuntá la cámara del teléfono al código y abrí el enlace que aparece. Tiene que estar en la
-          misma red Wi-Fi que esta PC.
+          Apuntá la cámara del teléfono al código. Abrí el enlace en <strong style={{ color: '#e2e8f0' }}>Chrome</strong>{' '}
+          o <strong style={{ color: '#e2e8f0' }}>Safari</strong> — no dentro de WhatsApp.
         </div>
 
         {ips.length > 1 ? (
-          <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <label htmlFor="studio-connect-ip" style={{ fontSize: 12, color: '#94a3b8' }}>
-              Red:
+              IP:
             </label>
             <select
               id="studio-connect-ip"
@@ -119,14 +117,17 @@ export function CameraConnectQR({
               {ips.map((ip, i) => (
                 <option key={ip} value={i}>
                   {ip}
+                  {i === 0 ? ' (recomendada)' : ''}
                 </option>
               ))}
             </select>
-            <span style={{ fontSize: 11, color: '#64748b' }}>
-              Probá otra IP si la primera no carga (Ethernet vs Wi-Fi, VPN, etc.).
-            </span>
+            <span style={{ fontSize: 11, color: '#64748b' }}>Probá otra si la primera no carga.</span>
           </div>
-        ) : null}
+        ) : (
+          <div style={{ fontSize: 11, color: '#64748b', marginBottom: 10 }}>
+            IP de esta PC en la red: <strong style={{ color: '#cbd5e1' }}>{selectedIp}</strong>
+          </div>
+        )}
 
         <div
           style={{
@@ -144,7 +145,7 @@ export function CameraConnectQR({
           {url}
         </div>
 
-        <div style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+        <div style={{ marginTop: 10 }}>
           <button
             type="button"
             onClick={() => onCopyUrl(url)}
@@ -155,32 +156,12 @@ export function CameraConnectQR({
               background: '#1e293b',
               color: '#e2e8f0',
               fontSize: 12,
-              cursor: 'pointer'
+              cursor: 'pointer',
+              fontWeight: 600
             }}
           >
-            Copiar URL
+            Copiar URL del QR
           </button>
-          <button
-            type="button"
-            onClick={onExportCert}
-            style={{
-              padding: '6px 12px',
-              borderRadius: 8,
-              border: '1px solid #334155',
-              background: '#422006',
-              color: '#fde68a',
-              fontSize: 12,
-              cursor: 'pointer'
-            }}
-            title="Exporta el .crt para instalar en el celular y evitar la advertencia HTTPS."
-          >
-            Exportar certificado (.crt)
-          </button>
-        </div>
-
-        <div style={{ marginTop: 10, fontSize: 11, color: '#64748b', lineHeight: 1.5 }}>
-          La primera vez el celular muestra una advertencia de certificado (LAN autofirmado). Tocá
-          &quot;Avanzado&quot; y continuá; o instalá el .crt una vez y no vuelve a aparecer.
         </div>
       </div>
     </div>
