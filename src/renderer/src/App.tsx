@@ -543,22 +543,21 @@ export default function App() {
         cameraAliases.setAlias(id, defaultAlias)
       }
       const captureKind = displaySourceKind(pickerSourceId)
-      if (captureKind === 'screen') {
-        void applyExcludeFromCapture(true, true)
-      }
       const screenTip =
         captureKind === 'window'
           ? ' Ventana: YouTube/streaming suele quedar congelado. Cerrá y elegí «Solo pantallas» → monitor completo.'
           : captureKind === 'screen'
-            ? excludeFromCaptureSupported
-              ? ' «Ocultar en captura» activado en el modal. Si YouTube se ve congelado: desactivá aceleración por hardware en Chrome y/o reiniciá con npm run dev:no-gpu.'
-              : ' Si YouTube se ve congelado: desactivá aceleración por hardware en el navegador o usá npm run dev:no-gpu.'
+            ? excludeFromCaptureSupported && excludeFromCapture
+              ? ' Studio Live oculto en esta captura. Si YouTube se ve congelado: desactivá aceleración por hardware en Chrome y/o reiniciá con npm run dev:no-gpu.'
+              : excludeFromCaptureSupported
+                ? ' Studio Live visible en la captura (si ves espejo, activá «Ocultar en captura»). Si YouTube se ve congelado: desactivá aceleración por hardware en Chrome y/o reiniciá con npm run dev:no-gpu.'
+                : ' Si YouTube se ve congelado: desactivá aceleración por hardware en el navegador o usá npm run dev:no-gpu.'
             : ''
       setStatus(
         `${kindLabel} agregada como fuente «${defaultAlias}». Se graba con las demás al iniciar ISO. Evitá capturar la ventana de Studio Live (efecto espejo).${screenTip} Tip: «Solo controles» achica la ventana para no tapar YouTube.`
       )
     },
-    [applyExcludeFromCapture, cameraAliases, closeVideoSource, excludeFromCaptureSupported]
+    [cameraAliases, closeVideoSource, excludeFromCapture, excludeFromCaptureSupported]
   )
 
   const addDisplayCapture = useCallback(() => {
@@ -577,6 +576,9 @@ export default function App() {
     async (sourceId: string) => {
       setDisplayCapturePickerOpen(false)
       try {
+        if (displaySourceKind(sourceId) === 'screen' && excludeFromCaptureSupported) {
+          await applyExcludeFromCapture(excludeFromCapture, true)
+        }
         const stream = await acquireDesktopStreamFromSourceId(sourceId)
         const vt = stream.getVideoTracks()[0]
         const kindLabel = displayCaptureLabelFromTrack(vt) ?? 'Pantalla'
@@ -591,7 +593,7 @@ export default function App() {
         setStatus(`No se pudo capturar pantalla/ventana: ${msg}`)
       }
     },
-    [attachDisplayStream]
+    [applyExcludeFromCapture, attachDisplayStream, excludeFromCapture, excludeFromCaptureSupported]
   )
 
   /** Una sola pestaña «activa» para las cámaras: al cambiar se cierran los PeerConnections en la PC. */

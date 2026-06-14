@@ -132,8 +132,8 @@ export function DisplayCapturePicker({
                 Ocultar Studio Live en la captura
               </strong>
               <span style={{ display: 'block', marginTop: 4, color: '#94a3b8', fontSize: 11 }}>
-                Recomendado al grabar el monitor: vos seguís viendo y controlando la app, pero no sale en la grabación.
-                Al elegir una pantalla se activa solo.
+                Recomendado al grabar el monitor: vos seguís viendo y controlando la app, pero no sale en la
+                grabación. Desmarcá solo si querés que Studio Live aparezca en la captura.
               </span>
             </span>
           </label>
