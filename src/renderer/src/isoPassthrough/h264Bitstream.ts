@@ -138,6 +138,130 @@ export function spropParameterSets(sdp: string): { sps: Uint8Array; pps: Uint8Ar
   return { sps, pps }
 }
 
+class BitReader {
+  private bit = 0
+  constructor(private readonly data: Uint8Array) {}
+  u(n: number): number {
+    let value = 0
+    for (let i = 0; i < n; i++) {
+      const byte = this.data[this.bit >> 3] ?? 0
+      value = (value << 1) | ((byte >> (7 - (this.bit & 7))) & 1)
+      this.bit++
+    }
+    return value
+  }
+  ue(): number {
+    let zeros = 0
+    while (this.bit < this.data.length * 8 && this.u(1) === 0) zeros++
+    if (zeros === 0) return 0
+    if (zeros > 31) return 0
+    return (1 << zeros) - 1 + this.u(zeros)
+  }
+  se(): number {
+    const value = this.ue()
+    return (value & 1) === 0 ? -(value >> 1) : (value + 1) >> 1
+  }
+}
+
+function withoutEmulationPrevention(nal: Uint8Array): Uint8Array {
+  const out: number[] = []
+  for (let i = 0; i < nal.length; i++) {
+    if (i + 2 < nal.length && nal[i] === 0 && nal[i + 1] === 0 && nal[i + 2] === 3) {
+      out.push(0, 0)
+      i += 2
+      continue
+    }
+    out.push(nal[i])
+  }
+  return Uint8Array.from(out)
+}
+
+function skipScalingList(reader: BitReader, count: number): void {
+  let last = 8
+  let next = 8
+  for (let i = 0; i < count; i++) {
+    if (next !== 0) {
+      next = (last + reader.se() + 256) % 256
+    }
+    last = next === 0 ? last : next
+  }
+}
+
+/** Tamaño visible del SPS (sin el relleno a múltiplo de 16). Si no se puede leer, null. */
+export function h264SpsDisplaySize(sps: Uint8Array): { width: number; height: number } | null {
+  try {
+    const rbsp = withoutEmulationPrevention(sps)
+    if (nalType(rbsp) !== 7 || rbsp.length < 4) return null
+    const reader = new BitReader(rbsp)
+    reader.u(8)
+    const profile = reader.u(8)
+    reader.u(8)
+    reader.u(8)
+    reader.ue()
+    let chroma = 1
+    if (
+      profile === 100 ||
+      profile === 110 ||
+      profile === 122 ||
+      profile === 244 ||
+      profile === 44 ||
+      profile === 83 ||
+      profile === 86 ||
+      profile === 118 ||
+      profile === 128 ||
+      profile === 138 ||
+      profile === 139 ||
+      profile === 134 ||
+      profile === 135
+    ) {
+      chroma = reader.ue()
+      if (chroma === 3) reader.u(1)
+      reader.ue()
+      reader.ue()
+      reader.u(1)
+      if (reader.u(1)) {
+        const count = chroma === 3 ? 12 : 8
+        for (let i = 0; i < count; i++) {
+          if (reader.u(1)) skipScalingList(reader, i < 6 ? 16 : 64)
+        }
+      }
+    }
+    reader.ue()
+    const order = reader.ue()
+    if (order === 0) reader.ue()
+    else if (order === 1) {
+      reader.u(1)
+      reader.se()
+      reader.se()
+      const cycle = reader.ue()
+      for (let i = 0; i < cycle; i++) reader.se()
+    }
+    reader.ue()
+    reader.u(1)
+    const widthMbs = reader.ue() + 1
+    const heightUnits = reader.ue() + 1
+    const frameOnly = reader.u(1) === 1
+    if (!frameOnly) reader.u(1)
+    reader.u(1)
+    let width = widthMbs * 16
+    let height = heightUnits * 16 * (frameOnly ? 1 : 2)
+    if (reader.u(1)) {
+      const cropLeft = reader.ue()
+      const cropRight = reader.ue()
+      const cropTop = reader.ue()
+      const cropBottom = reader.ue()
+      const unitX = chroma === 0 || chroma === 3 ? 1 : 2
+      const unitY = (chroma === 0 || chroma === 3 ? 1 : 2) * (frameOnly ? 1 : 2)
+      width -= (cropLeft + cropRight) * unitX
+      height -= (cropTop + cropBottom) * unitY
+    }
+    if (width < 16 || height < 16 || width > 8192 || height > 8192) return null
+    return { width, height }
+  } catch {
+    return null
+  }
+}
+
 function configFrom(sps: Uint8Array, pps: Uint8Array): H264Config {
   return {
     sps,

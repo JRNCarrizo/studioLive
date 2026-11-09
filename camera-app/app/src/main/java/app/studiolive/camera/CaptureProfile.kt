@@ -7,7 +7,12 @@ data class CaptureProfile(
     val label: String
 ) {
     val maxBitrateBps: Int
-        get() = if (fps >= 60) 8_000_000 else 4_000_000
+        get() = when {
+            width >= 1920 && fps >= 60 -> 14_000_000
+            fps >= 60 -> 10_000_000
+            width >= 1920 -> 8_000_000
+            else -> 5_000_000
+        }
 }
 
 val captureProfiles = listOf(

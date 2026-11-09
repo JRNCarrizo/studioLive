@@ -668,12 +668,12 @@ export default function App() {
           playoutDelayHint?: number
         }
         try {
-          if ('jitterBufferTarget' in ev.receiver) receiver.jitterBufferTarget = 70
+          if ('jitterBufferTarget' in ev.receiver) receiver.jitterBufferTarget = 120
         } catch {
           /* El navegador puede rechazar el objetivo del buffer. */
         }
         try {
-          if ('playoutDelayHint' in ev.receiver) receiver.playoutDelayHint = 0.07
+          if ('playoutDelayHint' in ev.receiver) receiver.playoutDelayHint = 0.12
         } catch {
           /* Igual que arriba: es una pista, no un requisito. */
         }

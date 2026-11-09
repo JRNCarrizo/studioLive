@@ -3,6 +3,7 @@ import { ArrayBufferTarget as WebmTarget, Muxer as WebmMuxer } from 'webm-muxer'
 import {
   avcCodecString,
   buildAvcDecoderConfig,
+  h264SpsDisplaySize,
   prepareH264AccessUnit,
   spropParameterSets,
   type H264Config
@@ -49,8 +50,8 @@ export function startIsoPassthroughRecorder(opts: {
   let h264Config: H264Config | null = null
   let pending: PendingFrame | null = null
   let lastTimestamp = -1
-  let originMs: number | null = null
-  let pauseShiftMs = 0
+  let originUs: number | null = null
+  let pauseShiftUs = 0
   let pauseBeganMs: number | null = null
   let paused = false
   let armed = true
@@ -70,9 +71,9 @@ export function startIsoPassthroughRecorder(opts: {
     }
   }
 
-  function mapTimestamp(receiveTimeMs: number): number {
-    if (originMs == null) originMs = receiveTimeMs
-    let us = Math.round((receiveTimeMs - originMs - pauseShiftMs) * 1000)
+  function mapTimestamp(captureUs: number): number {
+    if (originUs == null) originUs = captureUs
+    let us = Math.round(captureUs - originUs - pauseShiftUs)
     if (us <= lastTimestamp) us = lastTimestamp + 1
     lastTimestamp = us
     return us
@@ -99,14 +100,16 @@ export function startIsoPassthroughRecorder(opts: {
   function accept(frame: IsoTapFrame): void {
     if (!armed || paused || failed || pauseBeganMs != null) return
     try {
-      const width = frame.width || widthHint || 1280
-      const height = frame.height || heightHint || 720
-      const timestamp = mapTimestamp(frame.receiveTimeMs)
+      const captureUs = Number.isFinite(frame.timestamp) ? frame.timestamp : frame.receiveTimeMs * 1000
+      const timestamp = mapTimestamp(captureUs)
 
       if (codec === 'h264') {
         const prepared = prepareH264AccessUnit(frame.data, h264Config)
         if (prepared?.config) h264Config = prepared.config
         if (!prepared || !prepared.data.byteLength || !h264Config) return
+        const fromSps = h264SpsDisplaySize(h264Config.sps)
+        const width = fromSps?.width || frame.width || widthHint || 1280
+        const height = fromSps?.height || frame.height || heightHint || 720
         if (!writer) {
           if (frame.type !== 'key') return
           widthHint = width
@@ -139,6 +142,8 @@ export function startIsoPassthroughRecorder(opts: {
         return
       }
 
+      const width = frame.width || widthHint || 1280
+      const height = frame.height || heightHint || 720
       if (!writer) {
         if (frame.type !== 'key') return
         widthHint = width
@@ -174,7 +179,7 @@ export function startIsoPassthroughRecorder(opts: {
     resume() {
       if (!armed || !paused) return
       if (pauseBeganMs != null) {
-        pauseShiftMs += performance.now() - pauseBeganMs
+        pauseShiftUs += (performance.now() - pauseBeganMs) * 1000
         pauseBeganMs = null
       }
       paused = false

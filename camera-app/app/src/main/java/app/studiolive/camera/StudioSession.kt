@@ -9,17 +9,18 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
-import org.webrtc.Camera2Enumerator
-import org.webrtc.CameraVideoCapturer
 import org.webrtc.DefaultVideoDecoderFactory
 import org.webrtc.DefaultVideoEncoderFactory
 import org.webrtc.EglBase
 import org.webrtc.IceCandidate
 import org.webrtc.MediaConstraints
+import org.webrtc.MediaStreamTrack
 import org.webrtc.PeerConnection
 import org.webrtc.PeerConnectionFactory
+import org.webrtc.RtpCapabilities
 import org.webrtc.RtpParameters
 import org.webrtc.RtpSender
+import org.webrtc.RtpTransceiver
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import org.webrtc.SurfaceTextureHelper
@@ -33,9 +34,12 @@ class StudioSession(
     private val eglBase: EglBase,
     private val preview: SurfaceViewRenderer,
     private val endpoint: StudioEndpoint,
-    private val onStatus: (String) -> Unit
+    private val onStatus: (String) -> Unit,
+    private val onTally: (String) -> Unit,
+    private val onCameraReady: (front: Boolean, torchAvailable: Boolean, zoomMax: Float) -> Unit
 ) {
     private val appContext = context.applicationContext
+    private val windowContext = context
     private val thread = HandlerThread("studio-rtc").apply { start() }
     private val handler = Handler(thread.looper)
     private val main = Handler(android.os.Looper.getMainLooper())
@@ -44,12 +48,11 @@ class StudioSession(
     private var socket: WebSocket? = null
     private var factory: PeerConnectionFactory? = null
     private var peer: PeerConnection? = null
-    private var capturer: CameraVideoCapturer? = null
+    private var capturer: StudioCapturer? = null
     private var textureHelper: SurfaceTextureHelper? = null
     private var videoSource: VideoSource? = null
     private var videoTrack: VideoTrack? = null
     private var videoSender: RtpSender? = null
-    private var cameraName: String? = null
     private var useFront = false
     private var cameraId: String? = null
     private var profile = captureProfiles.first()
@@ -75,7 +78,8 @@ class StudioSession(
                     .put("name", "Studio Live Cámara")
                     .put("workspace", endpoint.workspace)
                 webSocket.send(hello.toString())
-                status("Conectado al estudio. Tocá Rec.")
+                tally("stby")
+                status("Conectado. Tocá Rec.")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -105,6 +109,7 @@ class StudioSession(
                 transmitting = true
                 createOffer(restartIce = false)
                 main.post(onReady)
+                tally("stby")
                 status("Saliendo al aire…")
             } catch (error: Exception) {
                 status("No se pudo abrir la cámara: ${error.message}")
@@ -118,27 +123,28 @@ class StudioSession(
             transmitting = false
             closePeer()
             stopCapture()
+            tally("stby")
             status("Detenido. Tocá Rec para volver.")
         }
     }
 
-    fun switchFacing() {
+    fun switchTo(front: Boolean) {
         handler.post {
-            val current = capturer ?: return@post
-            val enumerator = Camera2Enumerator(appContext)
-            useFront = !useFront
-            val next = pickCamera(enumerator, useFront) ?: return@post
-            cameraName = next
-            current.switchCamera(object : CameraVideoCapturer.CameraSwitchHandler {
-                override fun onCameraSwitchDone(isFront: Boolean) {
-                    main.post { preview.setMirror(isFront) }
-                }
-
-                override fun onCameraSwitchError(error: String?) {
-                    status("No se pudo cambiar de cámara.")
-                }
-            }, next)
+            useFront = front
+            capturer?.switchFacing(front)
         }
+    }
+
+    fun setTorch(on: Boolean) {
+        handler.post { capturer?.setTorch(on) }
+    }
+
+    fun setZoom(value: Float) {
+        handler.post { capturer?.setZoom(value) }
+    }
+
+    fun noteOrientation() {
+        handler.post { capturer?.noteOrientation() }
     }
 
     fun release() {
@@ -208,27 +214,22 @@ class StudioSession(
 
     private fun openCamera() {
         ensureFactory()
-        val enumerator = Camera2Enumerator(appContext)
-        val name = pickCamera(enumerator, useFront) ?: error("Este teléfono no expone una cámara.")
-        cameraName = name
-        val events = object : CameraVideoCapturer.CameraEventsHandler {
-            override fun onCameraError(errorDescription: String?) {
-                status("Cámara: ${errorDescription ?: "error"}")
-            }
-            override fun onCameraDisconnected() {}
-            override fun onCameraFreezed(errorDescription: String?) {}
-            override fun onCameraOpening(cameraName: String?) {}
-            override fun onFirstFrameAvailable() {}
-            override fun onCameraClosed() {}
-        }
-        val nextCapturer = enumerator.createCapturer(name, events)
+        val nextCapturer = StudioCapturer(
+            windowContext,
+            onReady = { front, torchOk, zoomMax ->
+                useFront = front
+                preview.setMirror(front)
+                onCameraReady(front, torchOk, zoomMax)
+            },
+            onError = { message -> status(message) }
+        )
         val helper = SurfaceTextureHelper.create("studio-capture", eglBase.eglBaseContext)
-        val source = factory!!.createVideoSource(nextCapturer.isScreencast)
+        val source = factory!!.createVideoSource(false)
         nextCapturer.initialize(helper, appContext, source.capturerObserver)
         nextCapturer.startCapture(profile.width, profile.height, profile.fps)
+        if (useFront) nextCapturer.switchFacing(true)
         val track = factory!!.createVideoTrack("studio-video", source)
         track.addSink(preview)
-        main.post { preview.setMirror(useFront) }
         capturer = nextCapturer
         textureHelper = helper
         videoSource = source
@@ -245,7 +246,10 @@ class StudioSession(
             }
             override fun onSignalingChange(state: PeerConnection.SignalingState?) {}
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
-                if (state == PeerConnection.IceConnectionState.CONNECTED) status("Al aire.")
+                if (state == PeerConnection.IceConnectionState.CONNECTED) {
+                    tally("air")
+                    status("Al aire.")
+                }
             }
             override fun onStandardizedIceConnectionChange(state: PeerConnection.IceConnectionState?) {}
             override fun onIceConnectionReceivingChange(receiving: Boolean) {}
@@ -262,7 +266,36 @@ class StudioSession(
             override fun onRenegotiationNeeded() {}
             override fun onConnectionChange(newState: PeerConnection.PeerConnectionState?) {}
         })
-        videoSender = peer?.addTrack(videoTrack, listOf("studio"))
+        val track = videoTrack ?: return
+        val init = RtpTransceiver.RtpTransceiverInit(
+            RtpTransceiver.RtpTransceiverDirection.SEND_ONLY,
+            listOf("studio")
+        )
+        val transceiver = peer?.addTransceiver(track, init)
+        videoSender = transceiver?.sender
+        preferHardwareH264(transceiver)
+    }
+
+    private fun preferHardwareH264(transceiver: RtpTransceiver?) {
+        val current = transceiver ?: return
+        val caps = factory?.getRtpSenderCapabilities(MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO) ?: return
+        val h264 = caps.codecs.filter { it.name.equals("H264", ignoreCase = true) }
+        if (h264.isEmpty()) return
+        val ordered = mutableListOf<RtpCapabilities.CodecCapability>()
+        for (codec in h264) {
+            ordered.add(codec)
+            val apt = codec.preferredPayloadType.toString()
+            caps.codecs.firstOrNull { it.name.equals("rtx", true) && it.parameters["apt"] == apt }
+                ?.let { ordered.add(it) }
+        }
+        try {
+            current.setCodecPreferences(ordered)
+        } catch (_: Exception) {
+            try {
+                current.setCodecPreferences(h264)
+            } catch (_: Exception) {
+            }
+        }
     }
 
     private fun createOffer(restartIce: Boolean) {
@@ -272,20 +305,23 @@ class StudioSession(
             constraints.mandatory.add(MediaConstraints.KeyValuePair("IceRestart", "true"))
         }
         pc.createOffer(object : SdpObserver {
-            override fun onCreateSuccess(description: SessionDescription) {
-                val munged = preferH264Offer(description.description)
-                val offer = SessionDescription(SessionDescription.Type.OFFER, munged)
+            override fun onCreateSuccess(description: SessionDescription?) {
                 pc.setLocalDescription(object : SdpObserver {
                     override fun onSetSuccess() {
                         tuneSender()
-                        sendOffer(munged)
+                        val sdp = pc.localDescription?.description ?: description?.description
+                        if (sdp.isNullOrBlank()) {
+                            status("La oferta quedó vacía.")
+                            return
+                        }
+                        sendOffer(sdp)
                     }
                     override fun onSetFailure(error: String?) {
                         status("Oferta local: ${error ?: "falló"}")
                     }
                     override fun onCreateSuccess(description: SessionDescription?) {}
                     override fun onCreateFailure(error: String?) {}
-                }, offer)
+                })
             }
             override fun onCreateFailure(error: String?) {
                 status("No se armó la oferta: ${error ?: "falló"}")
@@ -299,6 +335,7 @@ class StudioSession(
         val sender = videoSender ?: return
         val params = sender.parameters
         val encoding = params.encodings.firstOrNull() ?: return
+        encoding.minBitrateBps = profile.maxBitrateBps
         encoding.maxBitrateBps = profile.maxBitrateBps
         encoding.maxFramerate = profile.fps
         params.degradationPreference = RtpParameters.DegradationPreference.MAINTAIN_FRAMERATE
@@ -348,14 +385,6 @@ class StudioSession(
         socket?.send(payload.toString())
     }
 
-    private fun pickCamera(enumerator: Camera2Enumerator, front: Boolean): String? {
-        val names = enumerator.deviceNames
-        val match = names.firstOrNull { name ->
-            if (front) enumerator.isFrontFacing(name) else enumerator.isBackFacing(name)
-        }
-        return match ?: names.firstOrNull()
-    }
-
     private fun stopCapture() {
         videoTrack?.removeSink(preview)
         videoTrack?.dispose()
@@ -382,6 +411,10 @@ class StudioSession(
 
     private fun status(text: String) {
         main.post { onStatus(text) }
+    }
+
+    private fun tally(state: String) {
+        main.post { onTally(state) }
     }
 
     private fun simpleObserver(onOk: () -> Unit) = object : SdpObserver {

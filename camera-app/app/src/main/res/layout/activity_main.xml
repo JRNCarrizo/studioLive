@@ -1,8 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/stage"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#070605">
+    android:background="#070605"
+    android:keepScreenOn="true">
 
     <org.webrtc.SurfaceViewRenderer
         android:id="@+id/preview"
@@ -10,25 +12,77 @@
         android:layout_height="match_parent" />
 
     <LinearLayout
+        android:id="@+id/connectPanel"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="top"
         android:background="#CC100e0c"
         android:orientation="vertical"
-        android:padding="12dp">
-
-        <TextView
-            android:id="@+id/status"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Escaneá el QR de la PC. La página del navegador sigue disponible."
-            android:textColor="#efe6d6"
-            android:textSize="13sp" />
+        android:paddingStart="10dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="10dp"
+        android:paddingBottom="8dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Studio Live"
+                android:textColor="#efe6d6"
+                android:textSize="13sp"
+                android:textStyle="bold" />
+
+            <LinearLayout
+                android:id="@+id/tally"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="10dp"
+                android:background="@drawable/key_bg"
+                android:gravity="center_vertical"
+                android:paddingStart="8dp"
+                android:paddingTop="4dp"
+                android:paddingEnd="8dp"
+                android:paddingBottom="4dp">
+
+                <View
+                    android:id="@+id/tallyLed"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:background="@drawable/led_off" />
+
+                <TextView
+                    android:id="@+id/tallyText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:text="Sync"
+                    android:textColor="#efe6d6"
+                    android:textSize="12sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/status"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:text="Escaneá el QR de la PC"
+                android:textColor="#cbbfa8"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center_vertical"
             android:orientation="horizontal">
 
             <EditText
@@ -36,47 +90,225 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:background="@drawable/key_bg"
                 android:hint="https://192.168.1.56:8788/"
                 android:importantForAutofill="no"
                 android:inputType="textUri"
+                android:padding="8dp"
                 android:textColor="#efe6d6"
                 android:textColorHint="#8d7d68"
                 android:textSize="13sp" />
 
-            <Button
+            <TextView
                 android:id="@+id/scanButton"
                 android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="QR" />
+                android:layout_height="36dp"
+                android:layout_marginStart="6dp"
+                android:background="@drawable/key_bg"
+                android:gravity="center"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp"
+                android:text="QR"
+                android:textColor="#ffb020"
+                android:textSize="13sp" />
         </LinearLayout>
 
         <Spinner
             android:id="@+id/quality"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp" />
+            android:layout_marginTop="6dp" />
     </LinearLayout>
 
     <LinearLayout
+        android:id="@+id/hud"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom"
         android:background="#E6100e0c"
-        android:gravity="center"
-        android:orientation="horizontal"
-        android:padding="12dp">
+        android:orientation="vertical"
+        android:padding="8dp">
 
-        <Button
-            android:id="@+id/facingButton"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:id="@+id/keyRow"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Frente" />
+            android:orientation="horizontal">
 
-        <Button
-            android:id="@+id/recButton"
-            android:layout_width="wrap_content"
+            <LinearLayout
+                android:id="@+id/camBack"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_weight="1"
+                android:background="@drawable/key_bg_on"
+                android:gravity="center"
+                android:orientation="horizontal">
+
+                <View
+                    android:id="@+id/camBackLed"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:background="@drawable/led_on" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:text="Tras"
+                    android:textColor="#efe6d6"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/camFront"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/key_bg"
+                android:gravity="center"
+                android:orientation="horizontal">
+
+                <View
+                    android:id="@+id/camFrontLed"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:background="@drawable/led_off" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:text="Frente"
+                    android:textColor="#efe6d6"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/torchKey"
+                android:layout_width="0dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:background="@drawable/key_bg"
+                android:gravity="center"
+                android:orientation="horizontal">
+
+                <View
+                    android:id="@+id/torchLed"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:background="@drawable/led_off" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:text="Luz"
+                    android:textColor="#efe6d6"
+                    android:textSize="13sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/zoomRow"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginStart="12dp"
-            android:text="Rec" />
+            android:layout_marginTop="6dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="W"
+                android:textColor="#8d7d68"
+                android:textSize="12sp" />
+
+            <SeekBar
+                android:id="@+id/zoomSlider"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:max="100"
+                android:progress="0"
+                android:progressTint="#ffb020"
+                android:thumbTint="#ffb020" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="T"
+                android:textColor="#8d7d68"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/zoomReadout"
+                android:layout_width="48dp"
+                android:layout_height="wrap_content"
+                android:gravity="end"
+                android:text="1.00×"
+                android:textColor="#efe6d6"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/recRow"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:gravity="center"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:id="@+id/recButton"
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                android:background="@drawable/rec_bg"
+                android:gravity="center"
+                android:orientation="vertical">
+
+                <View
+                    android:id="@+id/recDot"
+                    android:layout_width="10dp"
+                    android:layout_height="10dp"
+                    android:background="@drawable/led_live" />
+
+                <TextView
+                    android:id="@+id/recLabel"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Rec"
+                    android:textColor="#efe6d6"
+                    android:textSize="11sp" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:id="@+id/visorButton"
+                android:layout_width="wrap_content"
+                android:layout_height="40dp"
+                android:layout_marginStart="12dp"
+                android:background="@drawable/key_bg"
+                android:gravity="center"
+                android:orientation="horizontal"
+                android:paddingStart="12dp"
+                android:paddingEnd="12dp">
+
+                <View
+                    android:id="@+id/visorLed"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:background="@drawable/led_off" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:text="Visor"
+                    android:textColor="#efe6d6"
+                    android:textSize="13sp" />
+            </LinearLayout>
+        </LinearLayout>
     </LinearLayout>
 </FrameLayout>
