@@ -17,10 +17,11 @@ export function workspaceToolbar(accent: WorkspaceAccent): CSSProperties {
   return {
     marginBottom: 16,
     padding: '12px 14px',
-    borderRadius: 12,
-    border: '1px solid #334155',
+    borderRadius: 3,
+    border: '1px solid #000',
     borderLeft: `3px solid ${ACCENT[accent]}`,
-    background: '#0a1628',
+    background: 'linear-gradient(180deg, #221c16 0%, #12100e 100%)',
+    boxShadow: 'inset 0 1px 0 rgba(255,236,210,0.12)',
     display: 'flex',
     flexDirection: 'column',
     gap: 10
@@ -31,9 +32,10 @@ export function workspaceToolbar(accent: WorkspaceAccent): CSSProperties {
 export const workspaceInnerCard: CSSProperties = {
   marginBottom: 16,
   padding: '14px 14px',
-  borderRadius: 12,
-  border: '1px solid #334155',
-  background: '#0a1628',
+  borderRadius: 3,
+  border: '1px solid #000',
+  background: 'linear-gradient(180deg, #1a1612 0%, #0e0c0a 100%)',
+  boxShadow: 'inset 0 1px 0 rgba(255,236,210,0.08)',
   display: 'flex',
   flexDirection: 'column',
   gap: 12,
@@ -59,11 +61,13 @@ export const workspaceActionRowLabel: CSSProperties = {
 
 export const btnNeutral: CSSProperties = {
   padding: '8px 12px',
-  borderRadius: 8,
-  border: '1px solid #334155',
-  background: '#0f172a',
-  color: '#e2e8f0',
-  fontSize: 12,
+  borderRadius: 3,
+  border: '1px solid #4a4034',
+  background: 'linear-gradient(180deg, #3d352c 0%, #221c16 100%)',
+  color: '#f4eadc',
+  fontSize: 11,
+  letterSpacing: '0.08em',
+  textTransform: 'uppercase',
   cursor: 'pointer'
 }
 

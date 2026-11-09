@@ -63,6 +63,9 @@ export default defineConfig({
       strictPort: false
     },
     build: {
+      assetsInlineLimit(filePath) {
+        if (filePath.includes('pcmCapture.worklet')) return false
+      },
       rollupOptions: {
         input: resolve(__dirname, 'src/renderer/index.html')
       }

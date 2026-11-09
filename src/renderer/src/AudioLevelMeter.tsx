@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { drawSegmentMeter } from './ledMeter'
 
 /** VU aproximado (RMS) sobre el stream tal cual llega. */
 export function AudioLevelMeter({ stream }: { stream: MediaStream }) {
@@ -41,20 +42,12 @@ export function AudioLevelMeter({ stream }: { stream: MediaStream }) {
       const ctx = canvas.getContext('2d')
       const dpr = window.devicePixelRatio || 1
       const cssW = canvas.clientWidth || 320
-      const cssH = 14
+      const cssH = 18
       canvas.width = Math.floor(cssW * dpr)
       canvas.height = Math.floor(cssH * dpr)
       if (ctx) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-        ctx.fillStyle = '#1e293b'
-        ctx.fillRect(0, 0, cssW, cssH)
-        const wFill = cssW * decayRef.current
-        const grd = ctx.createLinearGradient(0, 0, cssW, 0)
-        grd.addColorStop(0, '#22c55e')
-        grd.addColorStop(0.72, '#eab308')
-        grd.addColorStop(1, '#ef4444')
-        ctx.fillStyle = grd
-        ctx.fillRect(0, 0, wFill, cssH)
+        drawSegmentMeter(ctx, cssW, cssH, decayRef.current, decayRef.current)
       }
 
       raf = requestAnimationFrame(draw)
@@ -70,16 +63,6 @@ export function AudioLevelMeter({ stream }: { stream: MediaStream }) {
   }, [stream])
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        width: '100%',
-        maxWidth: 420,
-        height: 14,
-        display: 'block',
-        borderRadius: 6,
-        border: '1px solid #334155'
-      }}
-    />
+    <canvas ref={canvasRef} className="vu-meter" style={{ maxWidth: 420 }} />
   )
 }

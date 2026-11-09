@@ -13,16 +13,33 @@ export function isFusionExportFileName(fileName: string): boolean {
   return /^fusion-\d+-\d+$/.test(base)
 }
 
-/** Convención ISO en App: `cam-{id}-{session}.webm`, `audio-{session}.webm`. */
+/** ISO: `cam-{id}-{session}.webm|.mp4`, `audio-{session}.webm|.wav`. */
 export function parseRecordingFileName(fileName: string): ParsedRecordingName | null {
-  const lower = fileName.toLowerCase()
-  if (!lower.endsWith('.webm')) return null
-  const base = fileName.slice(0, -'.webm'.length)
+  const match = /^(.*)\.(webm|mp4|wav)$/i.exec(fileName)
+  if (!match) return null
+  const base = match[1]
+  const ext = match[2].toLowerCase()
   const audio = /^audio-(\d+)$/.exec(base)
-  if (audio) return { kind: 'audio', session: Number(audio[1]) }
-  if (!base.startsWith('cam-')) return null
+  if (audio) {
+    if (ext !== 'webm' && ext !== 'wav') return null
+    return { kind: 'audio', session: Number(audio[1]) }
+  }
+  if (ext === 'wav' || !base.startsWith('cam-')) return null
   const tail = base.slice('cam-'.length)
-  const m = /^(.+)-(\d+)$/.exec(tail)
-  if (!m) return null
-  return { kind: 'cam', cameraId: m[1], session: Number(m[2]) }
+  const cam = /^(.+)-(\d+)$/.exec(tail)
+  if (!cam) return null
+  return { kind: 'cam', cameraId: cam[1], session: Number(cam[2]) }
+}
+
+export function isoExtensionForMime(mime: string): 'webm' | 'mp4' | 'wav' {
+  const lower = mime.toLowerCase()
+  if (lower.includes('wav')) return 'wav'
+  if (lower.includes('mp4')) return 'mp4'
+  return 'webm'
+}
+
+export function isoOutputFileName(recKey: string, session: number, mime: string, audioKey: string): string {
+  const ext = isoExtensionForMime(mime)
+  if (recKey === audioKey) return `audio-${session}.${ext}`
+  return `cam-${recKey}-${session}.${ext}`
 }

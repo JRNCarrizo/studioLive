@@ -1,6 +1,6 @@
 {
   "name": "studio-live",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Estudio multicámara local (celulares → PC)",
   "author": "JRNCarrizo",
   "repository": {
@@ -24,8 +24,10 @@
     "electron-updater": "^6.6.2",
     "express": "^4.21.2",
     "ffmpeg-static": "^5.3.0",
+    "mp4-muxer": "^5.2.2",
     "qrcode.react": "^4.2.0",
     "selfsigned": "^5.5.0",
+    "webm-muxer": "^5.1.4",
     "ws": "^8.18.0"
   },
   "devDependencies": {

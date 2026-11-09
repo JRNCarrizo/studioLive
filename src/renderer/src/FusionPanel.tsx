@@ -707,10 +707,10 @@ export function FusionPanel({
       if (!info) {
         if (isFusionExportFileName(name)) {
           setLoadErr(
-            'Ese archivo es un export (fusion-*.webm). Cargá pistas ISO: cam-*.webm y, si hay, audio-*.webm.'
+            'Ese archivo es un export (fusion-*.webm). Cargá pistas ISO: cam-* y, si hay, audio-*.'
           )
         } else {
-          setLoadErr(`Archivo no reconocido (usá cam-* o audio-* de esta app): ${name}`)
+          setLoadErr(`Archivo no reconocido (usá cam-*.webm, cam-*.mp4 o audio-*.wav / audio-*.webm): ${name}`)
         }
         return
       }
@@ -747,13 +747,13 @@ export function FusionPanel({
     }
 
     if (audioCount > 1) {
-      setLoadErr('Seleccioná un solo archivo audio-*.webm.')
+      setLoadErr('Seleccioná un solo archivo de audio (audio-*.wav o audio-*.webm).')
       return
     }
 
     cams.sort((a, b) => a.cameraId.localeCompare(b.cameraId))
     if (!cams.length) {
-      setLoadErr('Necesitás al menos un vídeo cam-*.webm.')
+      setLoadErr('Necesitás al menos un vídeo cam-*.webm o cam-*.mp4.')
       return
     }
 
@@ -2044,8 +2044,10 @@ export function FusionPanel({
         {clips.length === 0 ? (
           <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.55, maxWidth: 640 }}>
             Cargá las pistas guardadas en <strong style={{ color: '#e2e8f0' }}>Sesión en vivo</strong>:{' '}
-            <code style={{ color: '#cbd5e1' }}>cam-*.webm</code> por cámara y, si hay,{' '}
-            <code style={{ color: '#cbd5e1' }}>audio-*.webm</code>. Armá el programa, reproducí y grabá la mezcla.
+            <code style={{ color: '#cbd5e1' }}>cam-*</code> por cámara (<code style={{ color: '#cbd5e1' }}>.webm</code> o{' '}
+            <code style={{ color: '#cbd5e1' }}>.mp4</code>) y, si hay, <code style={{ color: '#cbd5e1' }}>audio-*</code>{' '}
+            (<code style={{ color: '#cbd5e1' }}>.wav</code> o <code style={{ color: '#cbd5e1' }}>.webm</code>). Armá el
+            programa, reproducí y grabá la mezcla.
           </div>
         ) : (
           <div style={{ fontSize: 12, color: '#94a3b8', lineHeight: 1.45 }}>
@@ -2059,7 +2061,7 @@ export function FusionPanel({
             type="button"
             disabled={liveRecording}
             onClick={() => void loadIsoFiles()}
-            title="Elegí los cam-*.webm (y audio-*.webm) de una misma sesión en la carpeta de grabación."
+            title="Elegí los cam-* (webm o mp4) y el audio-* (wav o webm) de una misma sesión."
             style={{
               padding: '8px 14px',
               borderRadius: 8,

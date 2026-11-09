@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { AnalyserPeakMeter } from './AnalyserPeakMeter'
 import { AudioLevelMeter } from './AudioLevelMeter'
+import { SpectrumMeter } from './SpectrumMeter'
 
 const POS_STORAGE = 'studioLive.pcAudioPanel.v2'
 const GAIN_STORAGE = 'studioLive.pcAudio.gainPercent'
@@ -174,6 +175,7 @@ export function FloatingPcAudioPanel({
     return (
       <div
         ref={rootRef}
+        className="console-module"
         role="dialog"
         aria-modal="false"
         aria-label="Audio de PC (minimizado)"
@@ -247,7 +249,19 @@ export function FloatingPcAudioPanel({
         </div>
         <div style={{ padding: '4px 10px 8px' }}>
           {analyser && hasLiveTrack ? (
-            <AnalyserPeakMeter analyser={analyser} height={8} showClipZone={false} onClipChange={setClipping} />
+            <>
+              <div className="meter-caption">
+                <span>Nivel</span>
+                <span>{clipping ? 'Clip' : 'VU'}</span>
+              </div>
+              <AnalyserPeakMeter analyser={analyser} height={18} showClipZone onClipChange={setClipping} />
+              <div className="meter-caption" style={{ marginTop: 8 }}>
+                <span>20 Hz</span>
+                <span>Frecuencias</span>
+                <span>20 kHz</span>
+              </div>
+              <SpectrumMeter analyser={analyser} />
+            </>
           ) : hasLiveTrack && rawStream ? (
             <div style={{ transform: 'scaleY(0.55)', transformOrigin: 'top' }}>
               <AudioLevelMeter stream={rawStream} />
@@ -263,6 +277,7 @@ export function FloatingPcAudioPanel({
   return (
     <div
       ref={rootRef}
+      className="console-module"
       role="dialog"
       aria-modal="false"
       aria-label="Audio de PC"

@@ -171,7 +171,7 @@ ipcMain.handle('studio:drain-signaling-messages', (_evt, max?: number) => {
 ipcMain.handle('studio:sig-send', (_evt, raw: string) => {
   try {
     const msg = JSON.parse(raw) as SignalingMsg
-    if (msg.type !== 'answer' && msg.type !== 'ice') return false
+    if (msg.type !== 'answer' && msg.type !== 'ice' && msg.type !== 'keyframe') return false
     signalingRuntime?.injectHostMessage(msg)
     return true
   } catch {
@@ -237,7 +237,7 @@ ipcMain.handle('studio:pick-fusion-files', async () => {
     properties: ['openFile', 'multiSelections'],
     // Dos entradas: en Windows el desplegable "Tipo" permite ver todos los archivos si hace falta.
     filters: [
-      { name: 'WebM (cam-*, audio-*)', extensions: ['webm'] },
+      { name: 'Pistas ISO (cam-*, audio-*)', extensions: ['webm', 'mp4', 'wav'] },
       { name: 'Todos los archivos', extensions: ['*'] }
     ]
   })
@@ -357,12 +357,12 @@ ipcMain.handle(
       if (existingDir) {
         const destDir = path.join(parentDir, existingDir.name)
         const inner = await readdir(destDir).catch(() => [])
-        const hasWebm = inner.some((f) => f.toLowerCase().endsWith('.webm'))
-        if (hasWebm) {
+        const hasTake = inner.some((f) => /\.(webm|mp4|wav)$/i.test(f))
+        if (hasTake) {
           return {
             ok: false as const,
             message:
-              'Ya existe una grabación con ese nombre (hay archivos .webm en esa carpeta). Elegí otro nombre.'
+              'Ya existe una grabación con ese nombre (hay archivos de video o audio en esa carpeta). Elegí otro nombre.'
           }
         }
         return { ok: true as const, destDir }

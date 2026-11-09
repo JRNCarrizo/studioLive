@@ -3,27 +3,40 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
-    <meta name="theme-color" content="#020617" />
+    <meta name="theme-color" content="#100e0c" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <title>Studio Live — Cámara</title>
     <style>
       :root {
         color-scheme: dark;
-        font-family: system-ui, sans-serif;
-        background: #020617;
-        color: #e8eef6;
+        font-family: Bahnschrift, "Segoe UI", sans-serif;
+        background: #070605;
+        color: #efe6d6;
       }
       html,
       body {
         margin: 0;
+        width: 100%;
         height: 100%;
         overflow: hidden;
-        background: #020617;
+        background: #070605;
+      }
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
       }
       /* Escena fija: toda la pantalla */
       .stage {
         position: fixed;
-        inset: 0;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        max-width: 100%;
+        overflow: hidden;
         background: #000;
         z-index: 0;
       }
@@ -40,6 +53,94 @@
         object-fit: cover;
         background: #000;
       }
+      .finder {
+        position: absolute;
+        top: 58px;
+        right: 14px;
+        bottom: 236px;
+        left: 14px;
+        z-index: 2;
+        pointer-events: none;
+      }
+      .finder span {
+        position: absolute;
+        width: 28px;
+        height: 28px;
+        border: 2px solid rgba(255, 214, 150, 0.55);
+      }
+      .finder span:nth-child(1) { top: 0; left: 0; border-right: 0; border-bottom: 0; }
+      .finder span:nth-child(2) { top: 0; right: 0; border-left: 0; border-bottom: 0; }
+      .finder span:nth-child(3) { bottom: 0; left: 0; border-right: 0; border-top: 0; }
+      .finder span:nth-child(4) { bottom: 0; right: 0; border-left: 0; border-top: 0; }
+      .stage[data-air='live'] .finder span {
+        border-color: rgba(255, 48, 48, 0.9);
+      }
+      .status-bar {
+        position: absolute;
+        top: 0;
+        left: 0;
+        z-index: 8;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: 100%;
+        min-height: 48px;
+        padding: 10px 14px;
+        padding-top: max(10px, env(safe-area-inset-top));
+        box-sizing: border-box;
+        background: linear-gradient(to bottom, rgba(8, 6, 4, 0.92) 0%, rgba(8, 6, 4, 0.2) 100%);
+        pointer-events: none;
+      }
+      .brand {
+        letter-spacing: 0.22em;
+        font-size: 12px;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: #f3eadc;
+      }
+      .tally {
+        position: static;
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        gap: 7px;
+        letter-spacing: 0.16em;
+        font-size: 11px;
+        font-weight: 700;
+        text-transform: uppercase;
+        color: #ffb020;
+      }
+      .tally[data-state='wait'] i {
+        background: #c9842a;
+        box-shadow: 0 0 8px #c9842a;
+      }
+      .tally i {
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        background: #3a3228;
+        box-shadow: inset 0 1px 2px #000;
+        font-style: normal;
+      }
+      .tally[data-state='stby'] i {
+        background: #ffb020;
+        box-shadow: 0 0 8px #ffb020;
+      }
+      .tally[data-state='live'] {
+        color: #ffd0c8;
+      }
+      .tally[data-state='live'] i {
+        background: #ff2a2a;
+        box-shadow: 0 0 10px #ff2a2a;
+        animation: tally-pulse 1s steps(2, end) infinite;
+      }
+      .tally[data-state='fault'] i {
+        background: #ffb020;
+        box-shadow: 0 0 8px #ffb020;
+      }
+      @keyframes tally-pulse {
+        50% { opacity: 0.35; }
+      }
       /* Sin stream todavía: mensaje centrado */
       .splash {
         position: absolute;
@@ -48,97 +149,241 @@
         place-items: center;
         padding: 24px;
         text-align: center;
-        color: #94a3b8;
-        font-size: 14px;
         z-index: 1;
         pointer-events: none;
       }
+      .splash-card {
+        padding: 16px 18px;
+        border: 1px solid #3a3228;
+        background: rgba(16, 14, 12, 0.72);
+        box-shadow: inset 0 1px 0 rgba(255, 236, 210, 0.12);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 12px;
+        color: #b7a894;
+      }
       .splash strong {
-        color: #e2e8f0;
+        display: block;
+        margin-bottom: 6px;
+        color: #f3eadc;
+        letter-spacing: 0.18em;
+        font-size: 13px;
       }
       .splash.hidden {
         opacity: 0;
         visibility: hidden;
       }
-      /* Controles sobre el vídeo */
+      /* Placa de controles, como el lateral de una cámara de cine. */
       .hud {
         position: absolute;
         left: 0;
         right: 0;
         bottom: 0;
+        width: 100%;
+        max-width: 100%;
+        overflow: hidden;
         z-index: 3;
         padding: 12px;
         padding-bottom: max(12px, env(safe-area-inset-bottom));
         padding-left: max(12px, env(safe-area-inset-left));
         padding-right: max(12px, env(safe-area-inset-right));
-        background: linear-gradient(to top, rgba(2, 6, 23, 0.94) 0%, rgba(2, 6, 23, 0.55) 55%, transparent 100%);
+        background:
+          linear-gradient(180deg, rgba(36, 31, 26, 0.96) 0%, rgba(16, 14, 12, 0.98) 100%);
+        border-top: 1px solid #000;
+        box-shadow: inset 0 1px 0 rgba(255, 236, 210, 0.14);
       }
       .hud-row {
         display: flex;
-        gap: 10px;
-        flex-wrap: wrap;
+        gap: 8px;
         align-items: stretch;
+        width: 100%;
+        min-width: 0;
       }
-      .hud-row button {
-        flex: 1 1 auto;
-        min-width: 120px;
+      .hud-cams {
+        display: grid;
+        grid-template-columns: 1fr 1fr 1fr;
+        gap: 8px;
+        width: 100%;
+        max-width: 100%;
+      }
+      .hud-cams > button {
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        overflow: hidden;
       }
       button {
-        padding: 14px 16px;
-        border-radius: 12px;
-        border: 0;
-        font-weight: 600;
-        font-size: 16px;
-        background: #2563eb;
-        color: white;
+        appearance: none;
+        -webkit-appearance: none;
+        -webkit-tap-highlight-color: transparent;
+        min-height: 54px;
+        padding: 8px 6px;
+        border-radius: 3px;
+        border: 1px solid #4a4034;
+        background: linear-gradient(180deg, #3d352c 0%, #221c16 100%);
+        color: #f4eadc;
+        box-shadow:
+          inset 0 1px 0 rgba(255, 244, 220, 0.22),
+          0 2px 0 #000;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        font-family: inherit;
+        font-size: 11px;
+        font-weight: 700;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
       }
-      button.secondary {
-        background: rgba(30, 41, 59, 0.95);
-        color: #e2e8f0;
-        border: 1px solid #475569;
+      button:active:not(:disabled) {
+        transform: translateY(1px);
+        box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.45);
+      }
+      .led {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: #2a241c;
+        box-shadow: inset 0 1px 2px #000;
+        font-style: normal;
       }
       .cam-pick.active {
-        outline: 2px solid #38bdf8;
-        outline-offset: 2px;
-        background: rgba(30, 58, 138, 0.95);
+        border-color: #6a542c;
+        color: #fff6e8;
+        background: linear-gradient(180deg, #4a3b22 0%, #241c10 100%);
+      }
+      .cam-pick.active .led {
+        background: #ffb020;
+        box-shadow: 0 0 8px #ffb020;
+      }
+      #torchBtn.lamp-on {
+        border-color: #6a542c;
+        color: #fff6e8;
+      }
+      #torchBtn.lamp-on .led {
+        background: #fff1c2;
+        box-shadow: 0 0 10px #ffe7a0;
       }
       button:disabled {
-        opacity: 0.55;
+        opacity: 0.42;
       }
       /* Linterna: aunque no haya API torch, el botón puede intentar encenderla — no usar aspecto “fantasma”. */
       #torchBtn.torch-unavailable {
         opacity: 0.92;
       }
       .zoom-row {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto auto;
         align-items: center;
-        gap: 12px;
-        padding: 6px 0 2px;
-        flex-wrap: nowrap;
+        gap: 10px;
+        padding: 10px 2px 8px;
       }
-      .zoom-row label {
-        font-size: 13px;
-        font-weight: 600;
-        color: #94a3b8;
+      .zoom-mark,
+      #zoomReadout {
         flex: 0 0 auto;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.12em;
+        color: #8d7d68;
+      }
+      #zoomReadout {
+        min-width: 52px;
+        text-align: right;
+        font-family: Consolas, "Cascadia Mono", ui-monospace, monospace;
+        color: #ffb020;
+        text-shadow: 0 0 8px rgba(255, 176, 32, 0.35);
       }
       #zoomSlider {
-        flex: 1 1 auto;
+        -webkit-appearance: none;
+        appearance: none;
+        width: 100%;
         min-width: 0;
-        min-height: 40px;
-        accent-color: #38bdf8;
+        max-width: 100%;
+        height: 28px;
+        margin: 0;
+        background: transparent;
+        accent-color: #d7b07a;
+      }
+      #zoomSlider::-webkit-slider-runnable-track {
+        height: 6px;
+        border-radius: 1px;
+        background: linear-gradient(90deg, #5c4e3c, #e7c48a 72%, #8a6230);
+        box-shadow: inset 0 1px 2px #000;
+      }
+      #zoomSlider::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        width: 18px;
+        height: 26px;
+        margin-top: -11px;
+        border-radius: 2px;
+        border: 1px solid #6b5a40;
+        background: linear-gradient(180deg, #f2e2c8 0%, #8d7352 45%, #3a2e22 100%);
+        box-shadow: 0 1px 0 #000, inset 0 1px 0 rgba(255, 255, 255, 0.7);
       }
       #zoomSlider:disabled {
-        opacity: 0.45;
+        opacity: 0.4;
+      }
+      .transport-row {
+        display: grid;
+        grid-template-columns: 78px minmax(0, 148px);
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        padding-top: 4px;
+      }
+      .transport-row #fsBtn {
+        width: 100%;
+        max-width: none;
+      }
+      #btn {
+        flex: 0 0 78px;
+        width: 78px;
+        height: 78px;
+        min-height: 78px;
+        border-radius: 50%;
+        border: 3px solid #3a3228;
+        background: radial-gradient(circle at 38% 32%, #5a2420 0%, #1a0c0a 68%);
+        color: #ffd0c8;
+        letter-spacing: 0.16em;
+        box-shadow:
+          inset 0 2px 0 rgba(255, 190, 170, 0.28),
+          0 3px 0 #000,
+          0 10px 18px rgba(0, 0, 0, 0.45);
+      }
+      #btn .rec-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #ff2a2a;
+        box-shadow: 0 0 8px #ff2a2a;
+      }
+      #btn.is-live {
+        border-color: #ff6a5a;
+        background: radial-gradient(circle at 38% 32%, #ff5a48 0%, #8a120c 58%, #2a0806 100%);
+        color: #fff;
+        box-shadow:
+          0 0 18px rgba(255, 40, 40, 0.55),
+          inset 0 2px 0 rgba(255, 255, 255, 0.28),
+          0 3px 0 #000;
       }
       pre#log {
         margin: 0 0 10px;
-        max-height: 18vh;
+        max-height: 14vh;
         overflow: auto;
         white-space: pre-wrap;
         word-break: break-word;
-        font-size: 11px;
+        font-family: Consolas, "Cascadia Mono", ui-monospace, monospace;
+        font-size: 10px;
         line-height: 1.35;
-        color: #94a3b8;
+        letter-spacing: 0.02em;
+        text-transform: none;
+        color: #c6a15a;
+        background: #0a0908;
+        border: 1px solid #000;
+        box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.65);
+        padding: 6px 8px;
         -webkit-overflow-scrolling: touch;
       }
     </style>
@@ -146,27 +391,35 @@
   <body>
     <div class="stage" id="stage">
       <video id="pv" autoplay playsinline muted></video>
+      <div class="finder" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+      <div class="status-bar">
+        <span class="brand">Studio Live</span>
+        <span class="tally" id="tally" data-state="wait"><i></i><span id="tallyText">Sync</span></span>
+      </div>
       <div id="splash" class="splash">
-        <div>
-          <strong>Studio Live</strong><br />
-          Tocá «Transmitir» abajo para usar la cámara a pantalla completa en el celular.
+        <div class="splash-card">
+          <strong>Visor</strong>
+          Pulsá REC para salir al aire
         </div>
       </div>
       <div class="hud">
         <pre id="log"></pre>
-        <div class="hud-row hud-cams">
+        <div class="hud-cams">
           <button type="button" id="camEnv" class="secondary cam-pick active" disabled title="Cámara trasera">
-            Trasera
+            <i class="led"></i>
+            <span class="key-label">Tras</span>
           </button>
           <button type="button" id="camUser" class="secondary cam-pick" disabled title="Selfie / frontal">
-            Frontal
+            <i class="led"></i>
+            <span class="key-label">Frente</span>
           </button>
           <button type="button" id="torchBtn" class="secondary" disabled title="Solo en muchos Android con cámara trasera">
-            Linterna
+            <i class="led"></i>
+            <span class="key-label">Luz</span>
           </button>
         </div>
         <div class="hud-row zoom-row" id="zoomRow">
-          <label for="zoomSlider">Zoom</label>
+          <span class="zoom-mark">W</span>
           <input
             type="range"
             id="zoomSlider"
@@ -177,17 +430,23 @@
             value="1"
             title="Si tu equipo lo permite (suele verse en Chrome/Android, cámara trasera)"
           />
+          <span class="zoom-mark">T</span>
+          <span id="zoomReadout">—</span>
         </div>
-        <div class="hud-row">
-          <button type="button" id="btn" disabled>Iniciando…</button>
+        <div class="hud-row transport-row">
+          <button type="button" id="btn" disabled>
+            <i class="rec-dot"></i>
+            <span class="key-label">Sync</span>
+          </button>
           <button type="button" id="fsBtn" class="secondary" title="Oculta barras del navegador si el sistema lo permite">
-            Pantalla completa
+            <i class="led"></i>
+            <span class="key-label">Visor</span>
           </button>
         </div>
       </div>
     </div>
     <script>
-      const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }
+      const rtcConfig = { iceServers: [] }
 
       const logEl = document.getElementById('log')
       const btn = document.getElementById('btn')
@@ -199,6 +458,28 @@
       const pv = document.getElementById('pv')
       const splash = document.getElementById('splash')
       const zoomSlider = document.getElementById('zoomSlider')
+      const zoomReadout = document.getElementById('zoomReadout')
+      const tally = document.getElementById('tally')
+      const tallyText = document.getElementById('tallyText')
+
+      function setKeyLabel(el, text) {
+        if (!el) return
+        const cap = el.querySelector('.key-label')
+        if (cap) cap.textContent = text
+        else el.textContent = text
+      }
+
+      function setTally(state, text) {
+        if (!tally) return
+        tally.dataset.state = state
+        if (tallyText) tallyText.textContent = text
+      }
+
+      function paintZoom(value) {
+        if (!zoomReadout) return
+        const n = Number(value)
+        zoomReadout.textContent = Number.isFinite(n) ? n.toFixed(2) + '×' : '—'
+      }
 
       /** `environment` = trasera, `user` = frontal (selfie). */
       let facingModePreference = 'environment'
@@ -293,6 +574,45 @@
         low: 900_000
       }
 
+      /** VP8 y H.264 se pueden guardar en la PC sin recomprimir. El resto queda detrás. */
+      function preferPassthroughCodecs(pc) {
+        const caps = RTCRtpSender.getCapabilities && RTCRtpSender.getCapabilities('video')
+        if (!caps || !caps.codecs) return
+        const codecs = []
+        const want = ['video/vp8', 'video/h264', 'video/vp9', 'video/av1']
+        const picked = new Set()
+        for (const mime of want) {
+          for (const c of caps.codecs) {
+            if (String(c.mimeType || '').toLowerCase() !== mime || picked.has(c)) continue
+            picked.add(c)
+            codecs.push(c)
+          }
+        }
+        for (const c of caps.codecs) {
+          if (!picked.has(c)) codecs.push(c)
+        }
+        const transceiver = pc.getTransceivers().find((t) => t.sender && t.sender.track && t.sender.track.kind === 'video')
+        if (!transceiver || typeof transceiver.setCodecPreferences !== 'function') return
+        try {
+          transceiver.setCodecPreferences(codecs)
+        } catch (_) {}
+      }
+
+      async function forceKeyframe(peer) {
+        const sender = peer && peer.getSenders().find((s) => s.track && s.track.kind === 'video')
+        if (!sender || typeof sender.getParameters !== 'function') return
+        try {
+          const params = sender.getParameters()
+          if (!params.encodings || !params.encodings.length) params.encodings = [{}]
+          const enc = params.encodings[0]
+          const prev = enc.scaleResolutionDownBy || 1
+          enc.scaleResolutionDownBy = prev === 1 ? 1.01 : 1
+          await sender.setParameters(params)
+          enc.scaleResolutionDownBy = prev
+          await sender.setParameters(params)
+        } catch (_) {}
+      }
+
       async function applyOutboundVideoBitrateCap(pc) {
         const q = new URLSearchParams(location.search).get('preset') || 'medium'
         const maxBitrate = PRESET_MAX_WEBRTC_BITRATE[q] ?? PRESET_MAX_WEBRTC_BITRATE.medium
@@ -335,14 +655,14 @@
         const vt = localStream?.getVideoTracks?.()[0]
         if (!vt || facingModePreference === 'user') {
           torchBtn.disabled = true
-          torchBtn.classList.remove('torch-unavailable')
+          torchBtn.classList.remove('torch-unavailable', 'lamp-on')
           if (torchOn && vt) {
             torchOn = false
             try {
               vt.applyConstraints({ advanced: [{ torch: false }] }).catch(() => {})
             } catch (_) {}
           }
-          torchBtn.textContent = 'Linterna'
+          setKeyLabel(torchBtn, 'Luz')
           torchBtn.title = 'Solo con cámara trasera'
           return
         }
@@ -350,7 +670,8 @@
         const reportsTorch = caps.torch === true || caps.torch === 'constant' || caps.torch === 'smooth'
         torchBtn.disabled = false
         torchBtn.classList.toggle('torch-unavailable', !reportsTorch)
-        torchBtn.textContent = torchOn ? 'Apagar linterna' : 'Linterna'
+        torchBtn.classList.toggle('lamp-on', torchOn)
+        setKeyLabel(torchBtn, 'Luz')
         torchBtn.title = reportsTorch
           ? torchOn
             ? 'Apagar linterna'
@@ -394,6 +715,7 @@
         const vt = localStream?.getVideoTracks?.()[0]
         if (!vt || !zoomSlider) {
           if (zoomSlider) zoomSlider.disabled = true
+          paintZoom(NaN)
           return
         }
 
@@ -408,6 +730,7 @@
 
         if (!hasRange) {
           zoomSlider.disabled = true
+          paintZoom(NaN)
           zoomSlider.title =
             'Zoom por software no disponible aquí (proba Chrome en Android; iPhone suele no exponer zoom en web).'
           return
@@ -422,6 +745,7 @@
         cur = Math.min(zc.max, Math.max(zc.min, cur))
         zoomSlider.value = String(cur)
         zoomSlider.disabled = false
+        paintZoom(cur)
         zoomSlider.title = `Zoom ${cur.toFixed(2)} · min ${zc.min} · max ${zc.max}`
       }
 
@@ -462,7 +786,10 @@
             .then(() => {
               if (gen !== zoomAnimGeneration) return
               const z = vt.getSettings?.()?.zoom
-              if (typeof z === 'number' && zoomSlider) zoomSlider.title = `Zoom ${z.toFixed(2)}`
+              if (typeof z === 'number' && zoomSlider) {
+                zoomSlider.title = `Zoom ${z.toFixed(2)}`
+                paintZoom(z)
+              }
             })
             .catch(() => {})
           zoomRafId = 0
@@ -492,15 +819,19 @@
       const pendingRemoteIce = []
 
       function setMainButtonIdle(label) {
-        btn.textContent = label
+        setKeyLabel(btn, label)
         btn.disabled = false
-        btn.style.background = ''
+        btn.classList.remove('is-live')
+        stage.removeAttribute('data-air')
+        setTally('stby', 'Stby')
       }
 
       function setMainButtonStreaming() {
-        btn.textContent = 'Detener transmisión'
+        setKeyLabel(btn, 'Stop')
         btn.disabled = false
-        btn.style.background = '#b91c1c'
+        btn.classList.add('is-live')
+        stage.dataset.air = 'live'
+        setTally('live', 'Aire')
       }
 
       function stopTransmission(opts) {
@@ -533,7 +864,7 @@
         updateTorchAvailability()
         updateZoomUi()
 
-        setMainButtonIdle('Volver a transmitir')
+        setMainButtonIdle('Rec')
         if (!opts || !opts.silent) {
           log('Transmisión detenida. Tocá «Volver a transmitir» para enviar video a la PC otra vez.')
         }
@@ -769,6 +1100,7 @@
 
         pc = new RTCPeerConnection(rtcConfig)
         stream.getTracks().forEach((t) => pc.addTrack(t, stream))
+        preferPassthroughCodecs(pc)
         await applyOutboundVideoBitrateCap(pc)
 
         pc.onicecandidate = (ev) => {
@@ -812,7 +1144,8 @@
 
           if (!secure) {
             btn.disabled = true
-            btn.textContent = 'Usá HTTPS'
+            setKeyLabel(btn, 'Https')
+            setTally('fault', 'Https')
             camEnv.disabled = true
             camUser.disabled = true
             log(
@@ -822,7 +1155,8 @@
           }
           if (!hasGum) {
             btn.disabled = true
-            btn.textContent = 'Navegador incompatible'
+            setKeyLabel(btn, 'N/A')
+            setTally('fault', 'Nav')
             camEnv.disabled = true
             camUser.disabled = true
             log(
@@ -832,7 +1166,8 @@
           }
 
           btn.disabled = false
-          btn.textContent = 'Transmitir (pantalla completa)'
+          setKeyLabel(btn, 'Rec')
+          setTally('stby', 'Stby')
           camEnv.disabled = false
           camUser.disabled = false
           log(
@@ -873,6 +1208,11 @@
             return
           }
 
+          if (msg.type === 'keyframe') {
+            void forceKeyframe(pc)
+            return
+          }
+
           if (msg.type === 'ice') {
             if (!msg.candidate) return
             const c = new RTCIceCandidate(msg.candidate)
@@ -886,6 +1226,7 @@
 
         ws.onclose = () => {
           if (isTransmitting) stopTransmission({ silent: true })
+          setTally('fault', 'Sync')
           log('Señalización cerrada. Refrescá la página para volver a conectar.')
         }
 
@@ -904,7 +1245,7 @@
         } catch (e) {
           log('No se pudo usar la cámara:', e?.message || e)
           isTransmitting = false
-          setMainButtonIdle('Transmitir (pantalla completa)')
+          setMainButtonIdle('Rec')
         }
       })
 
@@ -913,6 +1254,7 @@
       torchBtn.addEventListener('click', () => void setTorch(!torchOn))
 
       zoomSlider.addEventListener('input', (e) => {
+        paintZoom(e.target.value)
         setZoomGoalFromSlider(e.target.value)
       })
 

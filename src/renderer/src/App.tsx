@@ -34,6 +34,12 @@ import {
   waitAfterMicRelease,
   writePcAudioWantsActive
 } from './pcAudioCapture'
+import { isoOutputFileName } from './recordingFileNames'
+import { attachIsoVideoTap, type IsoVideoTap } from './isoPassthrough/isoVideoTap'
+import { startHybridCameraRecorder } from './isoPassthrough/isoPassthroughRecorder'
+import { inboundPassthroughCodec, preferPassthroughVideoCodecs } from './isoPassthrough/videoCodec'
+import { mediaRecorderTrack, type IsoTrackRecorder } from './isoTrackRecorder'
+import { startPcmWavRecorder } from './pcmWavRecorder'
 import { UpdateBanner } from './UpdateBanner'
 import {
   pcAudioToolbarButton,
@@ -85,12 +91,14 @@ async function hostSigPush(httpPort: number, raw: string): Promise<boolean> {
   return r.ok
 }
 
+function requestCameraKeyframe(cameraId: string, httpPort: number): void {
+  const payload = JSON.stringify({ type: 'keyframe', cameraId })
+  if (httpPort > 0) void hostSigPush(httpPort, payload)
+  else void window.studio?.sendSig(payload)
+}
+
 const rtcConfig: RTCConfiguration = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' }
-  ],
-  iceCandidatePoolSize: 10,
+  iceServers: [],
   bundlePolicy: 'balanced',
   rtcpMuxPolicy: 'require'
 }
@@ -318,8 +326,8 @@ export default function App() {
   const hostPanelHttpPortRef = useRef(0)
   const pcsRef = useRef<Map<string, RTCPeerConnection>>(new Map())
   const iceQueuesRef = useRef<Map<string, RTCIceCandidate[]>>(new Map())
-  const recordersRef = useRef<Map<string, MediaRecorder>>(new Map())
-  const chunksRef = useRef<Map<string, BlobPart[]>>(new Map())
+  const isoTapsRef = useRef<Map<string, IsoVideoTap>>(new Map())
+  const recordersRef = useRef<Map<string, IsoTrackRecorder>>(new Map())
   const sessionRef = useRef<number>(0)
   /** Inicio de la grabación ISO actual (para cronómetro). */
   const isoRecordingStartedAtRef = useRef<number | null>(null)
@@ -486,6 +494,11 @@ export default function App() {
   }, [])
 
   const closeVideoSource = useCallback((sourceId: string) => {
+    const tap = isoTapsRef.current.get(sourceId)
+    if (tap) {
+      tap.dispose()
+      isoTapsRef.current.delete(sourceId)
+    }
     if (!isDisplayCaptureId(sourceId)) {
       const pc = pcsRef.current.get(sourceId)
       if (pc) {
@@ -634,12 +647,18 @@ export default function App() {
 
     const prev = pcsRef.current.get(cameraId)
     if (prev) prev.close()
+    isoTapsRef.current.get(cameraId)?.dispose()
+    isoTapsRef.current.delete(cameraId)
 
     const pc = new RTCPeerConnection(rtcConfig)
     pcsRef.current.set(cameraId, pc)
     setLaneRtcState((prev) => ({ ...prev, [cameraId]: pc.connectionState }))
 
     pc.ontrack = (ev) => {
+      if (ev.track.kind === 'video') {
+        const tap = attachIsoVideoTap(cameraId, ev.receiver)
+        if (tap) isoTapsRef.current.set(cameraId, tap)
+      }
       const stream = ev.streams[0] ?? new MediaStream([ev.track])
       setStreams((prev) => ({ ...prev, [cameraId]: stream }))
       setCameras((prev) => (prev.includes(cameraId) ? prev : [...prev, cameraId]))
@@ -675,6 +694,7 @@ export default function App() {
     iceQueuesRef.current.set(cameraId, [])
 
     await pc.setRemoteDescription({ type: 'offer', sdp })
+    preferPassthroughVideoCodecs(pc)
     for (const c of queued) await pc.addIceCandidate(c).catch(() => {})
 
     const answer = await pc.createAnswer()
@@ -970,40 +990,21 @@ export default function App() {
 
   const stopRecording = useCallback(async () => {
     const recMap = recordersRef.current
-    const chunksMap = chunksRef.current
     const session = sessionRef.current
-
-    const mimeByCam = new Map<string, string>()
-    for (const [id, rec] of recMap.entries()) mimeByCam.set(id, rec.mimeType)
-
-    await Promise.all(
-      [...recMap.entries()].map(
-        ([, rec]) =>
-          new Promise<void>((resolve) => {
-            rec.onstop = () => resolve()
-            try {
-              rec.stop()
-            } catch {
-              resolve()
-            }
-          })
-      )
+    const stopped = await Promise.all(
+      [...recMap.entries()].map(async ([recKey, rec]) => {
+        try {
+          const part = await rec.stop()
+          return part ? { recKey, parts: part.parts, mime: part.mime } : null
+        } catch {
+          return null
+        }
+      })
     )
-
     recMap.clear()
 
-    const items: PendingIsoSave['items'] = []
-    for (const [recKey, parts] of chunksMap.entries()) {
-      items.push({
-        recKey,
-        parts: [...parts],
-        mime:
-          mimeByCam.get(recKey) ??
-          (recKey === PC_AUDIO_RECORDER_KEY ? 'audio/webm' : 'video/webm')
-      })
-    }
+    const items = stopped.filter((item): item is PendingIsoSave['items'][number] => item != null)
 
-    chunksMap.clear()
     isoRecordingStartedAtRef.current = null
     isoPausedTotalMsRef.current = 0
     isoPauseStartedAtRef.current = null
@@ -1032,25 +1033,12 @@ export default function App() {
 
   const pauseIsoRecording = useCallback(() => {
     if (!recording || isoPaused) return
-    if (!ISO_RECORDER_CAN_PAUSE) {
-      setStatus('Este entorno no permite pausar la grabación ISO (sin MediaRecorder.pause).')
-      return
-    }
-    let any = false
-    for (const rec of recordersRef.current.values()) {
-      if (rec.state === 'recording') {
-        try {
-          rec.pause()
-          any = true
-        } catch {
-          /* vacío */
-        }
-      }
-    }
-    if (!any) {
+    const recs = [...recordersRef.current.values()]
+    if (!recs.length) {
       setStatus('No hay pistas en grabación para pausar.')
       return
     }
+    for (const rec of recs) rec.pause()
     isoPauseStartedAtRef.current = Date.now()
     setIsoPaused(true)
     setStatus('Grabación en pausa. Tocá Continuar para seguir en la misma toma o Finalizar para cerrar.')
@@ -1058,21 +1046,12 @@ export default function App() {
 
   const resumeIsoRecording = useCallback(() => {
     if (!recording || !isoPaused) return
-    let any = false
-    for (const rec of recordersRef.current.values()) {
-      if (rec.state === 'paused') {
-        try {
-          rec.resume()
-          any = true
-        } catch {
-          /* vacío */
-        }
-      }
-    }
-    if (!any) {
+    const recs = [...recordersRef.current.values()]
+    if (!recs.length) {
       setStatus('No hay pistas pausadas para reanudar.')
       return
     }
+    for (const rec of recs) rec.resume()
     if (isoPauseStartedAtRef.current != null) {
       isoPausedTotalMsRef.current += Date.now() - isoPauseStartedAtRef.current
       isoPauseStartedAtRef.current = null
@@ -1094,16 +1073,13 @@ export default function App() {
       for (const item of items) {
         const blob = new Blob(item.parts, { type: item.mime })
         const buf = await blob.arrayBuffer()
-        const name =
-          item.recKey === PC_AUDIO_RECORDER_KEY
-            ? `audio-${session}.webm`
-            : `cam-${item.recKey}-${session}.webm`
+        const name = isoOutputFileName(item.recKey, session, item.mime, PC_AUDIO_RECORDER_KEY)
         await window.studio.saveVideo(`${dest}/${name}`, buf)
       }
       setPendingIsoSave(null)
       const leaf = folderLeafFromPath(dest)
       setStatus(
-        `Grabación guardada en «${leaf}» (subcarpeta dentro de tu carpeta de grabación). Para fusión, cargá los cam-*.webm desde ahí.`
+        `Grabación guardada en «${leaf}» (subcarpeta dentro de tu carpeta de grabación). Para fusión, cargá los cam-* y el audio-* desde ahí.`
       )
       setIsoSavedToast({ folder: leaf, path: dest })
     } catch (e) {
@@ -1138,56 +1114,87 @@ export default function App() {
     const audioMime = pickAudioRecorderMime()
     const isoVideoBps = isoVideoBitsPerSecondForPreset(videoPreset)
     sessionRef.current = Date.now()
-    chunksRef.current = new Map()
-    recordersRef.current = new Map()
+    const handles = new Map<string, IsoTrackRecorder>()
 
     const pcStreamForRec = await ensurePcAudioForRecording()
 
     let anyTrack = false
+    let copiedCameras = 0
+    let reencodedCameras = 0
+    let wavAudio = false
+
+    const armCompressed = (id: string, stream: MediaStream, attempts: MediaRecorderOptions[]) => {
+      const chunks: BlobPart[] = []
+      const rec = startIsoMediaRecorder(stream, chunks, attempts)
+      handles.set(id, mediaRecorderTrack(rec, chunks))
+    }
 
     try {
       for (const id of Object.keys(streams)) {
         const stream = streams[id]
         if (!stream) continue
-        if (!stream.getVideoTracks().some((t) => t.readyState !== 'ended')) continue
+        const videoTrack = stream.getVideoTracks().find((t) => t.readyState !== 'ended')
+        if (!videoTrack) continue
         anyTrack = true
-        const chunks: BlobPart[] = []
-        chunksRef.current.set(id, chunks)
+
+        const pc = pcsRef.current.get(id)
+        const tap = isoTapsRef.current.get(id)
+        if (pc && tap?.ready && !isDisplayCaptureId(id)) {
+          const codec = await inboundPassthroughCodec(pc)
+          if (codec) {
+            requestCameraKeyframe(id, hostPanelHttpPortRef.current)
+            const settings = videoTrack.getSettings()
+            const chunks: BlobPart[] = []
+            const camMime = pickIsoCameraRecorderMime(stream)
+            const attempts: MediaRecorderOptions[] = []
+            if (camMime) attempts.push({ mimeType: camMime, videoBitsPerSecond: isoVideoBps })
+            attempts.push({ videoBitsPerSecond: isoVideoBps })
+            attempts.push({})
+            const compressed = startIsoMediaRecorder(stream, chunks, attempts)
+            handles.set(
+              id,
+              startHybridCameraRecorder({
+                tap,
+                codec,
+                sdp: pc.remoteDescription?.sdp ?? '',
+                widthHint: settings.width ?? 0,
+                heightHint: settings.height ?? 0,
+                compressed,
+                chunks
+              })
+            )
+            copiedCameras++
+            continue
+          }
+        }
 
         const camMime = pickIsoCameraRecorderMime(stream)
         const attempts: MediaRecorderOptions[] = []
         if (camMime) attempts.push({ mimeType: camMime, videoBitsPerSecond: isoVideoBps })
         attempts.push({ videoBitsPerSecond: isoVideoBps })
         attempts.push({})
-
-        const rec = startIsoMediaRecorder(stream, chunks, attempts)
-        recordersRef.current.set(id, rec)
+        armCompressed(id, stream, attempts)
+        reencodedCameras++
       }
 
       if (pcStreamForRec?.getAudioTracks().length) {
         anyTrack = true
-        const chunks: BlobPart[] = []
-        chunksRef.current.set(PC_AUDIO_RECORDER_KEY, chunks)
-
-        const attempts: MediaRecorderOptions[] = []
-        if (audioMime) attempts.push({ mimeType: audioMime, audioBitsPerSecond: ISO_AUDIO_BITS_PER_SECOND })
-        attempts.push({ audioBitsPerSecond: ISO_AUDIO_BITS_PER_SECOND })
-        attempts.push({})
-
-        const rec = startIsoMediaRecorder(pcStreamForRec, chunks, attempts)
-        recordersRef.current.set(PC_AUDIO_RECORDER_KEY, rec)
+        try {
+          handles.set(PC_AUDIO_RECORDER_KEY, await startPcmWavRecorder(pcStreamForRec))
+          wavAudio = true
+        } catch (e) {
+          console.warn('[studio-live] WAV no disponible, se usa Opus', e)
+          const attempts: MediaRecorderOptions[] = []
+          if (audioMime) attempts.push({ mimeType: audioMime, audioBitsPerSecond: ISO_AUDIO_BITS_PER_SECOND })
+          attempts.push({ audioBitsPerSecond: ISO_AUDIO_BITS_PER_SECOND })
+          attempts.push({})
+          armCompressed(PC_AUDIO_RECORDER_KEY, pcStreamForRec, attempts)
+        }
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
-      recordersRef.current.forEach((r) => {
-        try {
-          r.stop()
-        } catch {
-          /* vacío */
-        }
-      })
-      recordersRef.current.clear()
-      chunksRef.current.clear()
+      await Promise.all([...handles.values()].map((rec) => rec.stop().catch(() => null)))
+      handles.clear()
       isoRecordingStartedAtRef.current = null
       setStatus(`No se pudo iniciar la grabación: ${msg}`)
       return
@@ -1200,19 +1207,27 @@ export default function App() {
       return
     }
 
+    recordersRef.current = handles
+
     const hasDisplayCapture = Object.keys(streams).some((id) => isDisplayCaptureId(id))
     const displayReminder = hasDisplayCapture
       ? ' Si capturaste pantalla: en Fusión en vivo la mini debe decir «Se mueve» (si dice «Parece congelada», no grabes).'
       : ''
+
+    const videoNote =
+      copiedCameras > 0 && reencodedCameras === 0
+        ? 'video de celulares sin recomprimir'
+        : copiedCameras > 0
+          ? 'celulares compatibles sin recomprimir; pantalla u otro códec se comprime'
+          : 'un archivo por cada cámara'
+    const audioNote = wavAudio ? ', audio de PC en WAV' : handles.has(PC_AUDIO_RECORDER_KEY) ? ', audio de PC' : ''
 
     isoRecordingStartedAtRef.current = Date.now()
     isoPausedTotalMsRef.current = 0
     isoPauseStartedAtRef.current = null
     setIsoPaused(false)
     setRecording(true)
-    setStatus(
-      `Grabación en curso: un archivo por cada cámara en vivo + audio de PC si está activo. Detené para escribir los archivos.${displayReminder}`
-    )
+    setStatus(`Grabación en curso: ${videoNote}${audioNote}. Detené para revisar.${displayReminder}`)
   }, [ensurePcAudioForRecording, outputDir, pendingIsoSave, streams, videoPreset])
 
   const toggleRecord = async () => {
@@ -1264,47 +1279,27 @@ export default function App() {
       style={{ display: 'flex', flexDirection: 'column', height: '100%' }}
     >
       {!directorCompactMode ? (
-      <header
-        style={{
-          padding: '14px 16px',
-          borderBottom: '1px solid #1e293b',
-          display: 'flex',
-          gap: 12,
-          alignItems: 'center',
-          flexWrap: 'wrap'
-        }}
-      >
-        <strong style={{ letterSpacing: 0.3 }}>Studio Live</strong>
-        <div
-          style={{
-            display: 'flex',
-            gap: 6,
-            alignItems: 'center',
-            flexWrap: 'wrap'
-          }}
-          role="tablist"
-          aria-label="Modo de trabajo"
-        >
+      <header className="console-header" style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+        <strong className="console-brand">
+          <i className="console-brand__led" aria-hidden />
+          Studio Live
+        </strong>
+        <div className="mode-switch" role="tablist" aria-label="Modo de trabajo">
           <button
             type="button"
+            className="mode-key"
+            data-mode="live"
             role="tab"
             aria-selected={workspaceMode === 'live'}
             onClick={() => setWorkspaceMode('live')}
-            style={{
-              padding: '6px 12px',
-              borderRadius: 8,
-              border:
-                workspaceMode === 'live' ? '2px solid #38bdf8' : '1px solid #334155',
-              background: workspaceMode === 'live' ? '#0c4a6e' : '#0f172a',
-              color: '#e2e8f0',
-              fontSize: 12,
-              fontWeight: workspaceMode === 'live' ? 700 : 500
-            }}
           >
-            1 · Sesión en vivo
+            <i className="mode-key__led" aria-hidden />
+            Iso
           </button>
           <button
             type="button"
+            className="mode-key"
+            data-mode="fusion"
             role="tab"
             aria-selected={workspaceMode === 'fusion'}
             onClick={() => {
@@ -1326,23 +1321,14 @@ export default function App() {
                   : 'No podés pasar a Fusión mientras grabás'
                 : 'Mezclar pistas ISO guardadas (paso 2)'
             }
-            style={{
-              padding: '6px 12px',
-              borderRadius: 8,
-              border:
-                workspaceMode === 'fusion' ? '2px solid #a78bfa' : '1px solid #334155',
-              background: workspaceMode === 'fusion' ? '#4c1d95' : '#0f172a',
-              color: '#e2e8f0',
-              fontSize: 12,
-              fontWeight: workspaceMode === 'fusion' ? 700 : 500,
-              opacity: isoBusy ? 0.45 : 1
-            }}
           >
-            2 · Fusión (archivos)
+            <i className="mode-key__led" aria-hidden />
+            Fusión
           </button>
-          <span aria-hidden style={{ color: '#475569', fontSize: 12, padding: '0 4px' }}>·</span>
           <button
             type="button"
+            className="mode-key"
+            data-mode="liveFusion"
             role="tab"
             aria-selected={workspaceMode === 'liveFusion'}
             onClick={() => {
@@ -1364,19 +1350,9 @@ export default function App() {
                   : 'No podés cambiar de pestaña mientras grabás'
                 : 'Programa al aire desde celulares (mezcla ya grabada, sin pistas ISO)'
             }
-            style={{
-              padding: '6px 12px',
-              borderRadius: 8,
-              border:
-                workspaceMode === 'liveFusion' ? '2px solid #14b8a6' : '1px solid #334155',
-              background: workspaceMode === 'liveFusion' ? '#134e4a' : '#0f172a',
-              color: '#e2e8f0',
-              fontSize: 12,
-              fontWeight: workspaceMode === 'liveFusion' ? 700 : 500,
-              opacity: isoBusy ? 0.45 : 1
-            }}
           >
-            Alt · Fusión en vivo
+            <i className="mode-key__led" aria-hidden />
+            Programa
           </button>
         </div>
         <div
@@ -1414,17 +1390,7 @@ export default function App() {
             {outputDir ? 'Cambiar carpeta' : 'Carpeta de grabación'}
           </button>
           {outputDir ? (
-            <span
-              title={outputDir}
-              style={{
-                fontSize: 11,
-                color: '#94a3b8',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                minWidth: 0
-              }}
-            >
+            <span className="folder-readout" title={outputDir} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
               <span style={{ color: '#cbd5e1', fontWeight: 600 }}>{folderLeafFromPath(outputDir)}</span>
               <span style={{ color: '#475569' }}> · </span>
               <span style={{ color: '#64748b' }}>{outputDir}</span>
@@ -1435,17 +1401,12 @@ export default function App() {
         </div>
         <UpdateBanner />
         <span
-          style={{
-            fontSize: 11,
-            padding: '2px 8px',
-            borderRadius: 6,
-            background: signalingReady ? '#14532d' : '#450a0a',
-            color: signalingReady ? '#bbf7d0' : '#fecaca',
-            flexShrink: 0
-          }}
-          title="IPC con el proceso principal: vaciado periódico de mensajes del servidor HTTPS/WSS"
+          className="sig-lamp"
+          data-on={signalingReady ? 'true' : 'false'}
+          title="Canal con el servidor local de cámaras"
         >
-          {signalingReady ? 'Señalización: OK' : 'Señalización: no'}
+          <i />
+          {signalingReady ? 'Sync' : 'Sync off'}
         </span>
       </header>
       ) : null}
@@ -2057,29 +2018,8 @@ function CameraTile({
   const displayName = alias && alias.length ? alias : cameraId
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        margin: 0,
-        padding: 0,
-        border: '1px solid #1e293b',
-        borderRadius: 10,
-        overflow: 'hidden',
-        background: 'linear-gradient(180deg, #0a0f18 0%, #070b12 100%)',
-        boxShadow: 'inset 0 1px 0 rgba(148,163,184,0.06)',
-        width: '100%',
-        minHeight: 0
-      }}
-    >
-      <div
-        aria-hidden
-        style={{
-          width: 4,
-          flexShrink: 0,
-          background: accent,
-          boxShadow: rtcState === 'connecting' || rtcState === 'checking' ? `0 0 8px ${accent}` : undefined
-        }}
-      />
+    <div className="monitor-bay" style={{ display: 'flex', margin: 0, padding: 0, overflow: 'hidden', width: '100%', minHeight: 0 }}>
+      <div className="monitor-bay__tally" aria-hidden style={{ flexShrink: 0, background: accent }} />
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
         <div
           style={{

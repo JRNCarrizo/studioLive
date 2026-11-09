@@ -1,0 +1,283 @@
+/* Consola de estudio: chasis, teclas, faders y lámparas.
+   Las teclas de transporte conservan su propia luz (REC / PLAY). */
+
+html,
+body {
+  background: #0e0c0a;
+  color: #efe6d6;
+  font-family: Bahnschrift, "Segoe UI", sans-serif;
+}
+
+.studio-app {
+  background:
+    radial-gradient(ellipse at 15% -10%, rgba(90, 70, 40, 0.22), transparent 42%),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.015) 0 1px, transparent 1px 4px),
+    linear-gradient(180deg, #1a1714 0%, #0e0c0a 100%);
+  color: #efe6d6;
+  font-family: Bahnschrift, "Segoe UI", sans-serif;
+}
+
+.console-header {
+  padding: 10px 14px !important;
+  border-bottom: 1px solid #000 !important;
+  background:
+    linear-gradient(180deg, #2a241c 0%, #16130f 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 236, 210, 0.16),
+    0 8px 18px rgba(0, 0, 0, 0.35);
+}
+
+.console-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  letter-spacing: 0.22em;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #f3eadc;
+}
+
+.console-brand__led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ffb020;
+  box-shadow: 0 0 8px #ffb020;
+}
+
+.mode-switch {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 4px;
+  background: #0a0908;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.65);
+}
+
+.mode-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 12px;
+  border-radius: 3px;
+  border: 1px solid #3a3228;
+  background: linear-gradient(180deg, #2c261f 0%, #17140f 100%);
+  color: #cbbba6;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.mode-key__led {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3a3228;
+  box-shadow: inset 0 1px 2px #000;
+}
+
+.mode-key[aria-selected='true'] {
+  color: #fff6e8;
+  border-color: #6a542c;
+  background: linear-gradient(180deg, #4a3b22 0%, #241c10 100%);
+}
+
+.mode-key[aria-selected='true'] .mode-key__led {
+  background: #ffb020;
+  box-shadow: 0 0 8px #ffb020;
+}
+
+.mode-key[data-mode='fusion'][aria-selected='true'] .mode-key__led {
+  background: #7eb6ff;
+  box-shadow: 0 0 8px #7eb6ff;
+}
+
+.mode-key[data-mode='liveFusion'][aria-selected='true'] .mode-key__led {
+  background: #3dffb0;
+  box-shadow: 0 0 8px #3dffb0;
+}
+
+.mode-key:disabled {
+  opacity: 0.4;
+}
+
+.sig-lamp {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #b7a894;
+}
+
+.sig-lamp i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #5a2018;
+  box-shadow: inset 0 1px 2px #000;
+  font-style: normal;
+}
+
+.sig-lamp[data-on='true'] i {
+  background: #3dff7a;
+  box-shadow: 0 0 8px #3dff7a;
+}
+
+.folder-readout {
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-size: 11px;
+  color: #d7c4a4;
+  letter-spacing: 0.02em;
+}
+
+/* Teclas de función: dejan de parecer botones de página. */
+.studio-app button:not(.studio-transport-btn):not(.fusion-dock-btn):not(.mode-key):not(.fusion-dock-transport__float-btn):not(.fusion-dock-transport__chrome-btn) {
+  border-radius: 3px !important;
+  border: 1px solid #4a4034 !important;
+  background: linear-gradient(180deg, #3d352c 0%, #221c16 100%) !important;
+  color: #f4eadc !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 244, 220, 0.22),
+    0 1px 0 #000 !important;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 11px !important;
+  font-weight: 600;
+}
+
+.studio-app button:not(:disabled):not(.studio-transport-btn):not(.fusion-dock-btn):not(.mode-key):hover {
+  filter: brightness(1.12);
+}
+
+.studio-app button:disabled {
+  cursor: not-allowed;
+}
+
+/* Transporte: teclas iluminadas, no píldoras. */
+.studio-transport,
+.fusion-dock-transport {
+  border-radius: 4px !important;
+  border: 1px solid #000 !important;
+  background: linear-gradient(180deg, #241f1a 0%, #100e0c 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 236, 210, 0.12),
+    0 10px 24px rgba(0, 0, 0, 0.35);
+}
+
+.studio-transport-btn,
+.fusion-dock-btn {
+  border-radius: 3px !important;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 2px 0 #000;
+}
+
+.studio-transport__clock,
+.fusion-dock-transport__time {
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  letter-spacing: 0.12em;
+  color: #ffb020 !important;
+  text-shadow: 0 0 8px rgba(255, 176, 32, 0.45);
+}
+
+/* Monitores de cámara. */
+.monitor-bay {
+  border-radius: 2px !important;
+  border: 1px solid #000 !important;
+  background: linear-gradient(180deg, #1c1814 0%, #0c0b09 100%) !important;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 220, 180, 0.06),
+    0 8px 18px rgba(0, 0, 0, 0.4) !important;
+}
+
+.monitor-bay__tally {
+  width: 6px;
+  box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.6);
+}
+
+.monitor-bay video {
+  background: #050403;
+}
+
+/* Módulos flotantes (audio, y los que lleven la clase). */
+.console-module {
+  border-radius: 4px !important;
+  border: 1px solid #000 !important;
+  background: linear-gradient(180deg, #221c16 0%, #100e0c 100%) !important;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 236, 210, 0.14),
+    0 18px 40px rgba(0, 0, 0, 0.55) !important;
+}
+
+.vu-meter {
+  width: 100%;
+  height: 18px;
+  display: block;
+  border-radius: 2px;
+  background: #070605;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.8);
+}
+
+.spectrum-meter {
+  width: 100%;
+  height: 72px;
+  display: block;
+  border-radius: 2px;
+  background: #070605;
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.8);
+}
+
+.meter-caption {
+  display: flex;
+  justify-content: space-between;
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #8d7d68;
+  margin-bottom: 4px;
+}
+
+/* Faders de consola. */
+.studio-app input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 22px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.studio-app input[type='range']::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, #1a3d28, #8a6a12 72%, #6a1a14);
+  box-shadow: inset 0 1px 3px #000;
+}
+
+.studio-app input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 22px;
+  margin-top: -8px;
+  border-radius: 2px;
+  border: 1px solid #6b5a40;
+  background: linear-gradient(180deg, #f2e2c8 0%, #8d7352 45%, #3a2e22 100%);
+  box-shadow: 0 1px 0 #000, inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.studio-app select,
+.studio-app input[type='text'],
+.studio-app input[type='number'],
+.studio-app textarea {
+  border-radius: 2px !important;
+  border: 1px solid #000 !important;
+  background: #0c0b09 !important;
+  color: #f0e2cc !important;
+  box-shadow: inset 0 2px 5px rgba(0, 0, 0, 0.55);
+  font-family: "Cascadia Mono", Consolas, ui-monospace, monospace;
+}

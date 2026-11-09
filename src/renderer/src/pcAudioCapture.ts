@@ -1,11 +1,13 @@
 /** Restricciones de captura: señal limpia desde interfaz (sin AGC/eco del navegador). */
-export const PC_AUDIO_CAPTURE_CONSTRAINTS: MediaTrackConstraints = {
+export const PC_AUDIO_CAPTURE_CONSTRAINTS = {
   echoCancellation: false,
   noiseSuppression: false,
   autoGainControl: false,
+  voiceIsolation: false,
+  latency: { ideal: 0 },
   sampleRate: { ideal: 48000 },
   channelCount: { ideal: 2 }
-}
+} as MediaTrackConstraints
 
 export const MIC_RELEASE_DELAY_MS = 250
 

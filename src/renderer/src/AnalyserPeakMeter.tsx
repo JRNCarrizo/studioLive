@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { drawSegmentMeter } from './ledMeter'
 
 type Props = {
   analyser: AnalyserNode
@@ -64,29 +65,16 @@ export function AnalyserPeakMeter({ analyser, height = 14, showClipZone = true, 
       const ctx = canvas.getContext('2d')
       const dpr = window.devicePixelRatio || 1
       const cssW = canvas.clientWidth || 280
-      const cssH = height
+      const cssH = Math.max(height, 16)
       canvas.width = Math.floor(cssW * dpr)
       canvas.height = Math.floor(cssH * dpr)
       if (ctx) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
-        ctx.fillStyle = '#1e293b'
-        ctx.fillRect(0, 0, cssW, cssH)
-        if (showClipZone) {
-          const clipX0 = cssW * 0.92
-          ctx.fillStyle = 'rgba(127, 29, 29, 0.35)'
-          ctx.fillRect(clipX0, 0, cssW - clipX0, cssH)
+        drawSegmentMeter(ctx, cssW, cssH, decayRef.current, Math.min(1, peakHoldRef.current))
+        if (showClipZone && clipping) {
+          ctx.fillStyle = 'rgba(255, 59, 48, 0.28)'
+          ctx.fillRect(cssW * 0.9, 0, cssW * 0.1, cssH)
         }
-        const wFill = cssW * decayRef.current
-        const grd = ctx.createLinearGradient(0, 0, cssW, 0)
-        grd.addColorStop(0, '#22c55e')
-        grd.addColorStop(0.68, '#eab308')
-        grd.addColorStop(0.9, '#f97316')
-        grd.addColorStop(1, '#ef4444')
-        ctx.fillStyle = grd
-        ctx.fillRect(0, 0, wFill, cssH)
-        const wPeak = cssW * Math.min(1, peakHoldRef.current)
-        ctx.fillStyle = clipping ? '#fecaca' : '#e2e8f0'
-        ctx.fillRect(Math.max(0, wPeak - 2), 0, 2, cssH)
       }
 
       raf = requestAnimationFrame(draw)
@@ -100,15 +88,6 @@ export function AnalyserPeakMeter({ analyser, height = 14, showClipZone = true, 
   }, [analyser, height, showClipZone])
 
   return (
-    <canvas
-      ref={canvasRef}
-      style={{
-        width: '100%',
-        height,
-        display: 'block',
-        borderRadius: 6,
-        border: '1px solid #334155'
-      }}
-    />
+    <canvas ref={canvasRef} className="vu-meter" style={{ height: Math.max(height, 16) }} />
   )
 }

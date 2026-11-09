@@ -26,6 +26,7 @@ export type SignalingMsg =
   | { type: 'answer'; cameraId: string; sdp: string }
   | { type: 'ice'; cameraId: string; candidate: IceCandidatePayload }
   | { type: 'host-ready' }
+  | { type: 'keyframe'; cameraId: string }
 
 /** Puerto HTTPS público + este offset = HTTP solo loopback para el panel (fetch sin IPC). */
 export const HOST_PANEL_HTTP_OFFSET = 3777
@@ -123,7 +124,7 @@ export async function createSignalingServer(opts: {
       if (camWs) send(camWs, msg)
       return
     }
-    if (msg.type === 'ice') {
+    if (msg.type === 'ice' || msg.type === 'keyframe') {
       const camWs = cameras.get(msg.cameraId)
       if (camWs) send(camWs, msg)
     }
@@ -178,7 +179,7 @@ export async function createSignalingServer(opts: {
         try {
           const raw = Buffer.concat(chunks).toString('utf8')
           const msg = JSON.parse(raw) as SignalingMsg
-          if (msg.type === 'answer' || msg.type === 'ice') injectHostMessage(msg)
+          if (msg.type === 'answer' || msg.type === 'ice' || msg.type === 'keyframe') injectHostMessage(msg)
           res.writeHead(204)
           res.end()
         } catch {

@@ -431,7 +431,7 @@ export function IsoRecordingReviewOverlay({
               src={active.url}
               onError={() =>
                 setPreviewError(
-                  'No se pudo reproducir esta toma (archivo vacío o formato no soportado). Podés guardar en disco e intentar abrir el .webm desde la carpeta.'
+                  'No se pudo reproducir esta toma (archivo vacío o formato no soportado). Podés guardar en disco e intentar abrir el archivo desde la carpeta.'
                 )
               }
               onPlay={showLinkedPcAudio ? onVideoPlay : undefined}
