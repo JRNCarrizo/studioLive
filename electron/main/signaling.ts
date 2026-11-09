@@ -45,15 +45,35 @@ function randomId(): string {
   return Math.random().toString(36).slice(2, 10)
 }
 
+/** Tailscale, WSL y otras virtuales no deben ser el QR por defecto: el celular no llega. */
+function lanAddressRank(adapterName: string, ip: string): number {
+  const virtual =
+    /tailscale|zerotier|wireguard|nordlynx|wsl|hyper-v|vethernet|virtualbox|vmware|bluetooth|docker|npcap|hamachi/i.test(
+      adapterName
+    )
+  const tailscaleNet = /^100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\./.test(ip)
+  if (virtual || tailscaleNet) return 40
+  if (ip.startsWith('169.254.')) return 50
+  if (ip.startsWith('192.168.')) return 0
+  if (ip.startsWith('10.')) return 1
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(ip)) return 2
+  return 10
+}
+
 export function getLanIPv4s(): string[] {
   const nets = os.networkInterfaces()
-  const out: string[] = []
+  const bestRank = new Map<string, number>()
   for (const name of Object.keys(nets)) {
     for (const net of nets[name] ?? []) {
-      if (net.family === 'IPv4' && !net.internal) out.push(net.address)
+      if (net.family !== 'IPv4' || net.internal) continue
+      const rank = lanAddressRank(name, net.address)
+      const prev = bestRank.get(net.address)
+      if (prev == null || rank < prev) bestRank.set(net.address, rank)
     }
   }
-  return [...new Set(out)]
+  return [...bestRank.entries()]
+    .sort((a, b) => a[1] - b[1] || a[0].localeCompare(b[0]))
+    .map(([ip]) => ip)
 }
 
 function listenHttps(server: https.Server, port: number): Promise<void> {
