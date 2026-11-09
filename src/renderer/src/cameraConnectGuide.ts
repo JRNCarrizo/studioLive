@@ -86,7 +86,7 @@ export function deriveConnectProgress(params: {
       id: 'scan',
       title: 'Escaneá el QR en el celular',
       detail:
-        'Usá la cámara del teléfono o Chrome. Abrí el enlace en Chrome (Android) o Safari (iPhone). No abras el link dentro de WhatsApp.',
+        'La página sigue igual: abrila en Chrome (Android) o Safari (iPhone), no en WhatsApp. Para más fluidez, la app Studio Live Cámara escanea este mismo QR y no reemplaza la página.',
       state: scanState
     },
     {
@@ -101,7 +101,7 @@ export function deriveConnectProgress(params: {
       title: 'Tocá Transmitir en el celular',
       detail: phoneTransmitting
         ? `Video en vivo (${transmittingCount} celular${transmittingCount !== 1 ? 'es' : ''}). Ya podés cerrar este panel.`
-        : 'En la página del celular, pulsá el botón grande Transmitir para mandar video a la PC.',
+        : 'En la página, pulsá Transmitir. En la app, pulsá Rec. Las dos entran al mismo estudio.',
       state: transmitState
     }
   ]

@@ -167,11 +167,13 @@ function startIsoMediaRecorder(stream: MediaStream, chunks: BlobPart[], optionAt
   throw new Error(lastMsg)
 }
 
-type VideoPresetId = 'isoMax' | 'high' | 'medium' | 'low'
+type VideoPresetId = 'fps60' | 'isoMax' | 'high' | 'medium' | 'low'
 
 /** Bitrate objetivo del WebM ISO en PC (alineado al preset de URL del celular). */
 function isoVideoBitsPerSecondForPreset(preset: VideoPresetId): number {
   switch (preset) {
+    case 'fps60':
+      return 8_000_000
     case 'isoMax':
       return 6_500_000
     case 'high':
@@ -196,6 +198,11 @@ const VIDEO_PRESET_OPTIONS: {
   hint: string
 }[] = [
   {
+    id: 'fps60',
+    label: 'Fluida — 1080p 60 fps',
+    hint: 'Una cámara, Wi‑Fi 5 GHz. Si el celular no llega a 60, baja a 720p60 y después a 30.'
+  },
+  {
     id: 'isoMax',
     label: 'ISO máxima — 1080p ~30 fps',
     hint: 'Máximo bitrate para 1–2 cámaras; Wi‑Fi 5 GHz cerca del router.'
@@ -207,12 +214,12 @@ const VIDEO_PRESET_OPTIONS: {
   },
   {
     id: 'medium',
-    label: 'Media — 720p ~24 fps',
+    label: 'Media — 720p ~30 fps',
     hint: 'Equilibrio recomendado por defecto.'
   },
   {
     id: 'low',
-    label: 'Baja — 480p ~24 fps',
+    label: 'Baja — 480p ~30 fps',
     hint: 'Wi-Fi flojo o hasta 6 celulares.'
   }
 ]
@@ -656,6 +663,20 @@ export default function App() {
 
     pc.ontrack = (ev) => {
       if (ev.track.kind === 'video') {
+        const receiver = ev.receiver as RTCRtpReceiver & {
+          jitterBufferTarget?: number
+          playoutDelayHint?: number
+        }
+        try {
+          if ('jitterBufferTarget' in ev.receiver) receiver.jitterBufferTarget = 70
+        } catch {
+          /* El navegador puede rechazar el objetivo del buffer. */
+        }
+        try {
+          if ('playoutDelayHint' in ev.receiver) receiver.playoutDelayHint = 0.07
+        } catch {
+          /* Igual que arriba: es una pista, no un requisito. */
+        }
         const tap = attachIsoVideoTap(cameraId, ev.receiver)
         if (tap) isoTapsRef.current.set(cameraId, tap)
       }

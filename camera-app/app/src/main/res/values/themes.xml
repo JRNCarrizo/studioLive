@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.StudioLiveCamera" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:statusBarColor">#100e0c</item>
+        <item name="android:navigationBarColor">#100e0c</item>
+        <item name="android:windowBackground">#070605</item>
+        <item name="colorPrimary">#ffb020</item>
+        <item name="colorOnPrimary">#1a140c</item>
+        <item name="android:textColor">#efe6d6</item>
+    </style>
+</resources>
